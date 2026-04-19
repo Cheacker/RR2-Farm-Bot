@@ -1,0 +1,295 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║           Royal Revolt 2 Farm Bot — Setup and Usage Guide                  ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+This guide is written step-by-step for someone with no coding experience.
+If you get stuck at any point, paste the error message into ChatGPT or Claude
+and say "I'm setting up the RR2 Farm Bot and got this error at step X."
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  WHAT DOES THE BOT DO?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+The bot automatically plays Royal Revolt 2 inside the MEmu Android emulator
+running on your PC:
+
+  • Closes and restarts Royal Revolt 2 at launch so it always starts clean.
+  • Opens the trophy menu, sets the trophy filter range automatically, and
+    searches the ranked list for opponents.
+  • Attacks the first opponent who is not currently active (online).
+  • Presses the archer and cannon buttons throughout the match.
+  • After the match, opens 3 chests in the Chamber of Fortune, then loops back.
+  • Remembers which players were active and skips them for 15 minutes to
+    avoid wasting time on failed attacks.
+  • If the bot stops for any reason, simply run it again — it will restart
+    the game and continue from the beginning of the loop.
+
+  It can run for extended sessions (~85 attacks in 3 hours).
+  With ~50% luck bonus it can generate 3.5 million gold and 750 pearls
+  (with Hans) per hour. Increase bread cost reduction, crit chance, and
+  CoF pearl bonus for maximum benefit.
+
+The bot runs entirely on your local machine. It does not connect to any
+external server or send any data anywhere.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  STEP 1 — DOWNLOAD THE CODE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Option A — Download as ZIP (recommended if you don't know git):
+  1. On the GitHub page, click the green "Code" button.
+  2. Select "Download ZIP".
+  3. Right-click the downloaded .zip file → "Extract All".
+  4. Remember where you extracted it (e.g. Desktop\rr2-farm-bot).
+
+Option B — Clone with git (if git is installed):
+  Open a terminal and run:
+    git clone https://github.com/USERNAME/REPO_NAME.git
+  Then enter the folder:
+    cd rr2-farm-bot-public
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  STEP 2 — INSTALL PYTHON
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  1. Go to https://www.python.org/downloads/
+  2. Click "Download Python 3.x.x" (3.10 or newer).
+  3. Run the installer.
+     IMPORTANT: On the first screen, check "Add Python to PATH"!
+  4. Click "Install Now".
+
+To verify, open a terminal (Win+R → cmd → Enter) and type:
+    python --version
+You should see "Python 3.x.x".
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  STEP 3 — INSTALL REQUIRED PYTHON PACKAGES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Open a terminal and run:
+
+    pip install adbutils opencv-python pytesseract numpy
+
+This installs 4 packages (may take a minute or two):
+  • adbutils       — communicates with the Android emulator
+  • opencv-python  — image recognition
+  • pytesseract    — OCR for reading player names
+  • numpy          — math library used internally
+
+When it finishes you should see "Successfully installed ..."
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  STEP 4 — INSTALL TESSERACT OCR (for reading player names)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Tesseract is a separate program — pytesseract is only a Python wrapper around it.
+
+  1. Download the Windows installer from:
+       https://github.com/UB-Mannheim/tesseract/wiki
+     Look for "The latest installers" near the bottom of the page.
+     Download the file named "tesseract-ocr-w64-setup-x.x.x.exe".
+  2. Run the installer — click Next > Next > Install without changing anything.
+  3. The default installation path is:
+       C:\Program Files\Tesseract-OCR\tesseract.exe
+
+  If you installed it somewhere else, open src\vision.py and update this line
+  near the top:
+    pytesseract.pytesseract.tesseract_cmd = r"C:\...\tesseract.exe"
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  STEP 5 — SET UP MEMU EMULATOR
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+MEmu is a free, reliable, and lightweight Android emulator for Windows.
+It runs smoothly on most PCs and is the recommended emulator for this bot.
+Download it from https://www.memuplay.com/ if you haven't already.
+
+Game language — set to English (strongly recommended):
+
+  The bot's templates were captured with an English game. Using a different
+  language will cause most buttons to go undetected and the bot will not work.
+
+  To change the game language through the Android device language:
+    MEmu Android Settings (gear icon) → Search Languages&input → Make Primary Language English → restart MEmu.
+  The game reads the device language on startup, so after the restart Royal
+  Revolt 2 will be in English.
+
+  Do NOT change the emulator resolution. It has to be 1600*900 (300 dpi). The templates were captured 
+  at a specific resolution — changing it will break template matching.
+
+Finding your MEmu ADB port:
+
+  The bot connects to MEmu over an "ADB port". Here is how to find it:
+
+  Way A — Read it from MEmu's config file (most reliable):
+    1. Download "Everything" — a free instant file search tool:
+         https://www.voidtools.com/
+    2. Open Everything and type this in the search bar:
+         Microvirt\MeMu\MemuHyperV
+    3. In the results, click on the MEmu folder to open it.
+    4. Find and open the file named "MEmu.memu" (open with Notepad).
+    5. Press Ctrl+F and search for: adb
+    6. Look for a line containing "hostport=XXXXX" — that 5-digit number
+       is your ADB port.
+
+  Way B — Trial and error:
+    The default is 21503. If the bot cannot connect, try 21513 or 21523.
+
+MEmu HyperV — enabling Windows Hyper-V:
+
+  MEmu HyperV requires the Windows Hyper-V feature to be turned on.
+  If MEmu HyperV won't start, do the following:
+
+  1. Open Control Panel → switch view to "Large icons" →
+     click "Programs and Features".
+  2. On the left side click "Turn Windows features on or off".
+  3. In the list, check the box next to "Hyper-V" (expand it and check
+     all sub-items too).
+  4. Click OK and restart your PC when prompted.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  STEP 6 — RUN THE BOT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Before starting the bot — do this ONCE (first time only):
+
+  ① Place boosted Archer in your FIRST troop slot.
+    The bot detects the archer button to know when a match has started.
+    If slot 1 is empty, has a different unit, or the archer is not boosted,
+    the bot will not function correctly.
+
+  That's it. You do NOT need to navigate to any particular screen or set
+  the trophy filter — the bot closes and reopens the game itself, and
+  adjusts the filter automatically.
+
+  Running the bot:
+
+  1. Open MEmu. Royal Revolt 2 does NOT need to be open — the bot will
+     launch it automatically.
+  2. Open a terminal and navigate to the bot folder:
+       cd "C:\...\rr2-farm-bot-public"
+  3. Start the bot:
+       python src\bot.py
+     To use a custom ADB port (default is 21503):
+       python src\bot.py 21513
+     To set a trophy filter target (default 600, range 600–3500):
+       python src\bot.py 21503 1200
+
+  5. You should see "Bot started! Press Ctrl+C to stop."
+  6. To stop the bot at any time: press Ctrl+C in the terminal.
+  7. If the bot stops for any reason, simply run the same command again.
+
+  TIPS:
+  • Do not click inside the MEmu window while the bot is running — it will
+    interfere with the bot's taps.
+  • You can minimize the MEmu window; the bot will still work.
+  • Watch the first few matches to confirm everything is working correctly.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  HOW TO VERIFY THE CODE YOURSELF (OR WITH AI)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+This bot is fully open source. It does not send anything to the internet,
+does not collect passwords or account information, and does not modify any
+game files. You can verify this yourself:
+
+  1. Go to ChatGPT (chatgpt.com) or Claude (claude.ai).
+  2. Open one of the source files, select all text, and paste it.
+  3. Ask:
+       "What does this code do? Does it send any data to the internet?
+        Is there anything harmful in it? Please explain clearly."
+  4. The AI will read the file line by line and explain it to you.
+
+Files worth checking:
+  src\bot.py        — main logic (the game loop and state machine)
+  src\controller.py — sends taps and swipes to the emulator via ADB
+  src\vision.py     — searches for buttons and icons in screenshots
+  src\player_db.py  — saves active player records to player_data.json
+  recrop.py         — helper tool to capture new template images
+
+The only library that makes a network connection is adbutils, and it
+connects only to your local emulator (127.0.0.1), not to the internet.
+All other libraries (opencv, pytesseract, numpy) do pure local computation.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  COMMON PROBLEMS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Problem: "'adb' is not recognized as an internal or external command"
+Fix:     ADB is not in your system PATH. You have two options:
+         Option 1 — Use MEmu's bundled ADB (easiest):
+           Find adb.exe inside the MEmu installation folder
+           (search for "adb.exe" in Everything, pick the one inside
+           the Microvirt\MeMu folder).
+           Use the full path when running adb commands, e.g.:
+             "C:\Program Files\Microvirt\MEmu\adb.exe" devices
+         Option 2 — Install Android Platform Tools:
+           Download from https://developer.android.com/studio/releases/platform-tools
+           Extract the zip, then add the extracted folder to your
+           system PATH (search "environment variables" in Windows
+           Start menu → edit PATH → add the folder).
+
+Problem: "No ADB devices found"
+Fix:     Is MEmu running? Enable ADB in MEmu Settings → Other.
+         In a terminal run "adb devices" — your emulator should be listed.
+
+Problem: "ModuleNotFoundError: No module named 'cv2'"
+Fix:     Run: pip install opencv-python
+
+Problem: "tesseract is not installed or not in PATH"
+Fix:     Tesseract is not installed, or the path in src\vision.py is wrong.
+         Find where tesseract.exe is installed and update that line.
+
+Problem: Bot cannot find the trophy icon (shuts down after 20 misses)
+Fix:     Your game resolution or language differs from the templates.
+         Re-capture icon_trophy using recrop.py (option 1).
+         Make sure the Android device language is set to English.
+
+Problem: Bot cannot find any swords (shuts down after 27 misses)
+Fix:     The ranking list is not visible. Re-capture area_top_opponent
+         using recrop.py (option 3).
+
+Problem: Bot clicks in the wrong place
+Fix:     Update BLUE_SEARCH_COORDS, ARCHER_COORDS, CANNON_COORDS in
+         src\bot.py using get_coords.py to find the correct positions.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  RECAPTURING TEMPLATES (if the bot fails to detect buttons)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Templates are the reference images the bot uses to locate buttons on screen.
+If your emulator screen looks different from the defaults, run:
+
+    python recrop.py
+
+and re-capture the templates that are failing. All images are saved to
+En_Templates. You only need to recapture the ones that are not working.
+
+Template capture checklist (use recrop.py menu numbers):
+
+   1. icon_trophy
+   2. btn_start_search
+   3. area_top_opponent
+   4. btn_attack_start
+   5. btn_continue
+   6. btn_sell
+   7. btn_give_up
+   8-13. chest_1 … chest_6
+   14. btn_archer
+   15. btn_bring_me_back
+   16. btn_green_back
+   17. btn_collect
+   18. big_collect
+   19. btn_close
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

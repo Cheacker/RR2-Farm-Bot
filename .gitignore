@@ -1,0 +1,6 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+player_data.json
+fail_debug/
