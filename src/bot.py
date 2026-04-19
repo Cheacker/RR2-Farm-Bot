@@ -119,7 +119,7 @@ class RR2Bot:
                 self.adb.tap(10, 10)
 
             if self._trophy_miss_count % 3 == 0:
-                close = self.vision.find_template(screen, "btn_close", threshold=0.80)
+                close = self.vision.find_template(screen, "btn_close", threshold=0.57)
                 if close:
                     print("[HOME] Pressing btn_close...")
                     self.adb.tap(close[0], close[1])
