@@ -55,6 +55,10 @@ class RR2Bot:
         self._trophy_miss_count = 0
         self._in_game_start     = 0
         self._trophy_filter     = trophy_filter
+        self._gold_start        = None
+        self._pearl_start       = None
+        self._gold_last         = None
+        self._pearl_last        = None
         self.db = PlayerDB()
 
     # ── Shutdown helper ───────────────────────────────────────────────────────
@@ -105,41 +109,41 @@ class RR2Bot:
         pos = self.vision.find_template(screen, "icon_trophy", 0.90)
         if pos:
             self._trophy_miss_count = 0
+            gold  = self.vision.read_region_number(screen, 102, 29, 253, 72)
+            pearl = self.vision.read_region_number(screen, 88, 194, 213, 228)
+            if gold is not None and pearl is not None:
+                if self._gold_start is None:
+                    self._gold_start  = gold
+                    self._pearl_start = pearl
+                self._gold_last  = gold
+                self._pearl_last = pearl
             print("[HOME] Trophy icon found, tapping...")
             self.adb.tap(pos[0], pos[1])
             self.state = State.TROPHY_MENU
             time.sleep(0.5)
         else:
             self._trophy_miss_count += 1
-            if self._trophy_miss_count > 20:
+            if self._trophy_miss_count > 21:
                 self._shutdown(f"home_trophy_miss_{self._trophy_miss_count}")
                 return
 
             if self._trophy_miss_count % 2 == 0:
                 self.adb.tap(10, 10)
 
-            if self._trophy_miss_count % 3 == 0:
+            if self._trophy_miss_count % 6 == 0:
                 close = self.vision.find_template(screen, "btn_close", threshold=0.57)
                 if close:
                     print("[HOME] Pressing btn_close...")
                     self.adb.tap(close[0], close[1])
                     time.sleep(0.5)
 
-            if self._trophy_miss_count % 10 == 0:
+            if self._trophy_miss_count % 5 == 0:
                 collect = self.vision.find_template(screen, "btn_collect", threshold=0.80)
                 if collect:
                     print(f"[HOME] {self._trophy_miss_count}th miss → pressing btn_collect...")
                     self.adb.tap(collect[0], collect[1])
-                    time.sleep(1)
-                    while True:
-                        f = self.adb.current_screen()
-                        close = self.vision.find_template(f, "btn_close", threshold=0.80) if f is not None else None
-                        if close:
-                            print("[HOME] Pressing btn_close...")
-                            self.adb.tap(close[0], close[1])
-                            break
-                        print("[HOME] Waiting for btn_close after collect...")
-                        time.sleep(0.3)
+                    time.sleep(1.5)
+                    self.adb.tap(1524, 86)
                 else:
                     close = self.vision.find_template(screen, "btn_close", threshold=0.80)
                     if close:
@@ -277,7 +281,6 @@ class RR2Bot:
             self.adb.tap(*ARCHER_COORDS)
             self.adb.tap(*CANNON_COORDS)
             time.sleep(0.1)
-            self.adb.tap(*ARCHER_COORDS)
             self.adb.tap(*CANNON_COORDS)
             self._in_game_start = time.time()
             self.state = State.IN_GAME
@@ -319,17 +322,26 @@ class RR2Bot:
                 print("[IN_GAME] Match ended, going to result screen...")
                 self.adb.tap(continue_pos[0], continue_pos[1])
                 self.state = State.CHAMBER_OF_FORTUNE
-                time.sleep(4)
+                time.sleep(1.25)
 
     # ── COF helpers ───────────────────────────────────────────────────────────
     def _cof_tap_home(self):
         now = time.time()
         self._match_count += 1
         loop_dur  = now - self._loop_start
-        total_dur = now - self._start_time
+        total_secs = int(now - self._start_time)
         self._loop_start = now
-        print(f"[COF] (500,500) tap → HOME | Match #{self._match_count} | Last loop: {loop_dur:.0f}s | Total: {total_dur:.0f}s")
-        print(f"Average time: {total_dur/self._match_count:.0f}s")
+        h = total_secs // 3600
+        m = (total_secs % 3600) // 60
+        s = total_secs % 60
+        total_str = f"{h:02d}:{m:02d}:{s:02d}"
+        if self._gold_last is not None and self._gold_start is not None:
+            gold_gain  = self._gold_last  - self._gold_start
+            pearl_gain = self._pearl_last - self._pearl_start
+            resources  = f" | Gold: +{gold_gain:,} | Pearls: +{pearl_gain}"
+        else:
+            resources = ""
+        print(f"[COF] Match #{self._match_count} | Loop: {loop_dur:.0f}s | Total: {total_str} | Avg: {total_secs/self._match_count:.0f}s{resources}")
         self.adb.tap(500, 500)
         self._chest_taps    = 0
         self._current_target = None
