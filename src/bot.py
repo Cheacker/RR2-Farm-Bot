@@ -129,6 +129,7 @@ class RR2Bot:
 
             if self._trophy_miss_count % 2 == 0:
                 self.adb.tap(10, 10)
+                time.sleep(0.1)
 
             if self._trophy_miss_count % 6 == 0:
                 close = self.vision.find_template(screen, "btn_close", threshold=0.57)
@@ -239,6 +240,7 @@ class RR2Bot:
             print(f"[FILTERED_RANKS] Tapping: {sword_pos}")
             self._current_target = name
             self.adb.tap(sword_pos[0], sword_pos[1])
+            time.sleep(0.1)
             self.state = State.ATTACK_PREP
             self._attack_prep_start = time.time()
             return
@@ -261,6 +263,7 @@ class RR2Bot:
     # ── GAME_LOAD ─────────────────────────────────────────────────────────────
     def handle_game_load(self, screen):
         self.adb.tap(*ARCHER_COORDS)
+        time.sleep(0.1)
         go_back = self.vision.find_template(screen, "btn_bring_me_back", threshold=0.9)
         if go_back:
             self._skip_top += 1
@@ -274,11 +277,13 @@ class RR2Bot:
             time.sleep(0.5)
             return
         self.adb.tap(*ARCHER_COORDS)
+        time.sleep(0.1)
         archer = self.vision.find_template(screen, "btn_archer", threshold=0.9)
         if archer:
             print("[GAME_LOAD] Archer button visible, match started!")
             self._skip_top = 0
             self.adb.tap(*ARCHER_COORDS)
+            time.sleep(0.1)
             self.adb.tap(*CANNON_COORDS)
             time.sleep(0.1)
             self.adb.tap(*CANNON_COORDS)
@@ -338,10 +343,12 @@ class RR2Bot:
         if self._gold_last is not None and self._gold_start is not None:
             gold_gain  = self._gold_last  - self._gold_start
             pearl_gain = self._pearl_last - self._pearl_start
-            resources  = f" | Gold: +{gold_gain:,} | Pearls: +{pearl_gain}"
+            resources  = f" | Gold: ~+{gold_gain:,} | Pearls: ~+{pearl_gain}"
         else:
             resources = ""
+        print("--------------------------------------------------------------------")
         print(f"[COF] Match #{self._match_count} | Loop: {loop_dur:.0f}s | Total: {total_str} | Avg: {total_secs/self._match_count:.0f}s{resources}")
+        print("--------------------------------------------------------------------")
         self.adb.tap(500, 500)
         self._chest_taps    = 0
         self._current_target = None
