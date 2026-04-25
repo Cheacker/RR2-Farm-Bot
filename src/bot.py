@@ -38,6 +38,12 @@ class RR2Bot:
     def __init__(self, port=21503, template_dir=None, trophy_filter=600):
         self.adb = ADBController(port=port)
         if not self.adb.device:
+            print("[MEMU] No ADB device — launching MEmu...")
+            subprocess.Popen([MEMU_EXE])
+            print("[MEMU] Waiting 20s for MEmu to start...")
+            time.sleep(20)
+            self.adb._reconnect()
+        if not self.adb.device:
             print("ADB connection failed.")
             exit(1)
         self.vision = VisionInterpreter(template_dir=template_dir)
