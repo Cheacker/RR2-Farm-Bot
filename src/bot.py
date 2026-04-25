@@ -1,6 +1,7 @@
 import sys
 import time
 import os
+import subprocess
 import cv2
 from controller import ADBController
 from vision import VisionInterpreter
@@ -9,10 +10,12 @@ from player_db import PlayerDB
 FAIL_DEBUG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "fail_debug")
 os.makedirs(FAIL_DEBUG_DIR, exist_ok=True)
 
-RR2_PACKAGE = "com.flaregames.rrtournament"
+RR2_PACKAGE            = "com.flaregames.rrtournament"
+MEMU_EXE               = r"C:\Program Files\Microvirt\MEmu\MEmu.exe"
+MEMU_RESTART_INTERVAL  = 3 * 3600  # restart MEmu every 3 hours
 
 # ── Coordinates ──────────────────────────────────────────────────────────────
-BLUE_SEARCH_COORDS = (1390, 248)
+BLUE_SEARCH_COORDS = (1436, 213)
 ARCHER_COORDS      = (200, 800)
 CANNON_COORDS      = (240, 800)
 MINUS_LEFT_COORDS  = (810, 226)
@@ -61,6 +64,21 @@ class RR2Bot:
         self._pearl_last        = None
         self.db = PlayerDB()
 
+    # ── MEmu restart ─────────────────────────────────────────────────────────
+    def _restart_memu(self):
+        print("[MEMU] 3-hour interval — force-closing MEmu...")
+        subprocess.run(["taskkill", "/F", "/IM", "MEmu.exe", "/T"], capture_output=True)
+        time.sleep(5)
+        print(f"[MEMU] Launching: {MEMU_EXE}")
+        subprocess.Popen([MEMU_EXE])
+        print("[MEMU] Waiting 20s for MEmu to start...")
+        time.sleep(20)
+        self.adb._reconnect()
+        self.db.set_last_memu_restart()
+        self.adb.restart_game(RR2_PACKAGE)
+        self.state = State.HOME
+        print("[MEMU] Restart complete.")
+
     # ── Shutdown helper ───────────────────────────────────────────────────────
     def _shutdown(self, reason: str):
         print(f"[SHUTDOWN] Reason: {reason}")
@@ -84,6 +102,12 @@ class RR2Bot:
                         self.handle_in_game(None)
                     time.sleep(0.5)
                     continue
+
+                if self.state == State.HOME:
+                    last_restart = self.db.get_last_memu_restart() or self._start_time
+                    if time.time() - last_restart >= MEMU_RESTART_INTERVAL:
+                        self._restart_memu()
+                        continue
 
                 if   self.state == State.HOME:               self.handle_home(screen)
                 elif self.state == State.TROPHY_MENU:        self.handle_trophy_menu(screen)
