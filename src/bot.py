@@ -11,7 +11,7 @@ FAIL_DEBUG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__
 os.makedirs(FAIL_DEBUG_DIR, exist_ok=True)
 
 RR2_PACKAGE            = "com.flaregames.rrtournament"
-MEMU_EXE               = r"C:\Program Files\Microvirt\MEmu\MEmu.exe"
+MEMU_EXE               = r"D:\Program Files\Microvirt\MEmu\MEmu.exe"
 MEMU_RESTART_INTERVAL  = 3 * 3600  # restart MEmu every 3 hours
 
 # ── Coordinates ──────────────────────────────────────────────────────────────
@@ -40,8 +40,8 @@ class RR2Bot:
         if not self.adb.device:
             print("[MEMU] No ADB device — launching MEmu...")
             subprocess.Popen([MEMU_EXE])
-            print("[MEMU] Waiting 20s for MEmu to start...")
-            time.sleep(20)
+            print("[MEMU] Waiting 15s for MEmu to start...")
+            time.sleep(15)
             self.adb._reconnect()
         if not self.adb.device:
             print("ADB connection failed.")
@@ -68,6 +68,7 @@ class RR2Bot:
         self._pearl_start       = None
         self._gold_last         = None
         self._pearl_last        = None
+        self._main_adb_fail     = 0
         self.db = PlayerDB()
 
     # ── MEmu restart ─────────────────────────────────────────────────────────
@@ -104,10 +105,16 @@ class RR2Bot:
             try:
                 screen = self.adb.current_screen()
                 if screen is None:
-                    if self.state == State.IN_GAME:
+                    self._main_adb_fail += 1
+                    if self._main_adb_fail >= 20:
+                        print(f"[ADB] No screen for {self._main_adb_fail} attempts — restarting MEmu...")
+                        self._restart_memu()
+                        self._main_adb_fail = 0
+                    elif self.state == State.IN_GAME:
                         self.handle_in_game(None)
                     time.sleep(0.5)
                     continue
+                self._main_adb_fail = 0
 
                 if self.state == State.HOME:
                     last_restart = self.db.get_last_memu_restart() or self._start_time
@@ -405,7 +412,8 @@ class RR2Bot:
             if f is None:
                 _adb_fail += 1
                 if _adb_fail >= 20:
-                    self._shutdown("cof_adb_lost")
+                    print("[COF] ADB lost — restarting MEmu...")
+                    self._restart_memu()
                     return
                 continue
             _adb_fail = 0
@@ -452,7 +460,8 @@ class RR2Bot:
             if f is None:
                 _adb_fail += 1
                 if _adb_fail >= 20:
-                    self._shutdown("cof_adb_lost")
+                    print("[COF] ADB lost — restarting MEmu...")
+                    self._restart_memu()
                     return
                 continue
             _adb_fail = 0
