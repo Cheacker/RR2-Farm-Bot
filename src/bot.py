@@ -100,7 +100,11 @@ class RR2Bot:
     # ── Main loop ─────────────────────────────────────────────────────────────
     def loop(self):
         print("Bot started! Press Ctrl+C to stop.")
-        self.adb.restart_game(RR2_PACKAGE)
+        last_restart = self.db.get_last_memu_restart() or 0
+        if time.time() - last_restart >= MEMU_RESTART_INTERVAL:
+            self._restart_memu()
+        else:
+            self.adb.restart_game(RR2_PACKAGE)
         while self.running:
             try:
                 screen = self.adb.current_screen()
