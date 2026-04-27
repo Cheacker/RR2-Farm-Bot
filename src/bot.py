@@ -40,13 +40,14 @@ class RR2Bot:
         if not self.adb.device:
             print("[MEMU] No ADB device — launching MEmu...")
             subprocess.Popen([MEMU_EXE])
-            print("[MEMU] Waiting for MEmu to be ready (up to 90s)...")
-            deadline = time.time() + 90
+            print("[MEMU] Waiting for MEmu ADB to be ready...")
+            time.sleep(15)
+            deadline = time.time() + 75
             while time.time() < deadline:
-                time.sleep(5)
-                self.adb._reconnect()
+                self.adb._connect()
                 if self.adb.device:
                     break
+                time.sleep(5)
         if not self.adb.device:
             print("ADB connection failed.")
             exit(1)
@@ -82,16 +83,17 @@ class RR2Bot:
         time.sleep(5)
         print(f"[MEMU] Launching: {MEMU_EXE}")
         subprocess.Popen([MEMU_EXE])
-        print("[MEMU] Waiting for MEmu to be ready (up to 90s)...")
-        deadline = time.time() + 90
+        print("[MEMU] Waiting for MEmu ADB to be ready...")
+        time.sleep(15)
+        deadline = time.time() + 75
         while time.time() < deadline:
-            time.sleep(5)
-            self.adb._reconnect()
+            self.adb._connect()
             if self.adb.device and self.adb.current_screen() is not None:
                 print("[MEMU] MEmu is ready.")
                 break
+            time.sleep(5)
         else:
-            print("[MEMU] Timeout — could not connect to MEmu after 90s.")
+            print("[MEMU] Timeout — MEmu did not start within 90s.")
         self.db.set_last_memu_restart()
         self.adb.restart_game(RR2_PACKAGE)
         self.state = State.HOME
@@ -112,8 +114,12 @@ class RR2Bot:
     # ── Main loop ─────────────────────────────────────────────────────────────
     def loop(self):
         print("Bot started! Press Ctrl+C to stop.")
-        last_restart = self.db.get_last_memu_restart() or 0
-        if time.time() - last_restart >= MEMU_RESTART_INTERVAL:
+        last_restart = self.db.get_last_memu_restart()
+        if last_restart is None:
+            # No record — MEmu state unknown; record now and just start the game
+            self.db.set_last_memu_restart()
+            self.adb.restart_game(RR2_PACKAGE)
+        elif time.time() - last_restart >= MEMU_RESTART_INTERVAL:
             self._restart_memu()
         else:
             self.adb.restart_game(RR2_PACKAGE)
