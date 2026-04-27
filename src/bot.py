@@ -40,9 +40,13 @@ class RR2Bot:
         if not self.adb.device:
             print("[MEMU] No ADB device — launching MEmu...")
             subprocess.Popen([MEMU_EXE])
-            print("[MEMU] Waiting 15s for MEmu to start...")
-            time.sleep(15)
-            self.adb._reconnect()
+            print("[MEMU] Waiting for MEmu to be ready (up to 90s)...")
+            deadline = time.time() + 90
+            while time.time() < deadline:
+                time.sleep(5)
+                self.adb._reconnect()
+                if self.adb.device:
+                    break
         if not self.adb.device:
             print("ADB connection failed.")
             exit(1)
@@ -73,17 +77,25 @@ class RR2Bot:
 
     # ── MEmu restart ─────────────────────────────────────────────────────────
     def _restart_memu(self):
-        print("[MEMU] 3-hour interval — force-closing MEmu...")
+        print("[MEMU] Force-closing MEmu...")
         subprocess.run(["taskkill", "/F", "/IM", "MEmu.exe", "/T"], capture_output=True)
         time.sleep(5)
         print(f"[MEMU] Launching: {MEMU_EXE}")
         subprocess.Popen([MEMU_EXE])
-        print("[MEMU] Waiting 20s for MEmu to start...")
-        time.sleep(20)
-        self.adb._reconnect()
+        print("[MEMU] Waiting for MEmu to be ready (up to 90s)...")
+        deadline = time.time() + 90
+        while time.time() < deadline:
+            time.sleep(5)
+            self.adb._reconnect()
+            if self.adb.device and self.adb.current_screen() is not None:
+                print("[MEMU] MEmu is ready.")
+                break
+        else:
+            print("[MEMU] Timeout — could not connect to MEmu after 90s.")
         self.db.set_last_memu_restart()
         self.adb.restart_game(RR2_PACKAGE)
         self.state = State.HOME
+        self._main_adb_fail = 0
         print("[MEMU] Restart complete.")
 
     # ── Shutdown helper ───────────────────────────────────────────────────────
