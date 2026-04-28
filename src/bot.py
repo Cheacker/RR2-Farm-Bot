@@ -15,8 +15,8 @@ MEMU_EXE               = r"D:\Program Files\Microvirt\MEmu\MEmu.exe"
 MEMU_RESTART_INTERVAL  = 3 * 3600  # restart MEmu every 3 hours
 
 # ── Coordinates ──────────────────────────────────────────────────────────────
-TROPHY_COORDS       = (0, 0)     # set with get_coords.py
-COLLECT_ALL_COORDS  = (0, 0)     # set with get_coords.py
+TROPHY_COORDS       = (1545, 128)     # set with get_coords.py
+COLLECT_ALL_RESOURCES  = (60, 506)     # set with get_coords.py
 BLUE_SEARCH_COORDS  = (1436, 213)
 ARCHER_COORDS      = (200, 800)
 CANNON_COORDS      = (240, 800)
@@ -39,9 +39,11 @@ class State:
 class RR2Bot:
     def __init__(self, port=21503, template_dir=None, trophy_filter=600):
         self.adb = ADBController(port=port)
+        self._memu_just_launched = False
         if not self.adb.device:
             print("[MEMU] No ADB device — launching MEmu...")
             subprocess.Popen([MEMU_EXE])
+            self._memu_just_launched = True
             print("[MEMU] Waiting for MEmu ADB to be ready...")
             time.sleep(15)
             deadline = time.time() + 75
@@ -86,11 +88,11 @@ class RR2Bot:
         print(f"[MEMU] Launching: {MEMU_EXE}")
         subprocess.Popen([MEMU_EXE])
         print("[MEMU] Waiting for MEmu ADB to be ready...")
-        time.sleep(15)
+        time.sleep(20)
         deadline = time.time() + 75
         while time.time() < deadline:
             self.adb._connect()
-            if self.adb.device and self.adb.current_screen() is not None:
+            if self.adb.device and self.adb.quick_screen_check():
                 print("[MEMU] MEmu is ready.")
                 break
             time.sleep(5)
@@ -117,8 +119,11 @@ class RR2Bot:
     def loop(self):
         print("Bot started! Press Ctrl+C to stop.")
         last_restart = self.db.get_last_memu_restart()
-        if last_restart is None:
-            # No record — MEmu state unknown; record now and just start the game
+        if self._memu_just_launched:
+            # MEmu was just launched in __init__ — treat as fresh restart, don't close again
+            self.db.set_last_memu_restart()
+            self.adb.restart_game(RR2_PACKAGE)
+        elif last_restart is None:
             self.db.set_last_memu_restart()
             self.adb.restart_game(RR2_PACKAGE)
         elif time.time() - last_restart >= MEMU_RESTART_INTERVAL:
@@ -178,9 +183,9 @@ class RR2Bot:
                     self._pearl_start = pearl
                 self._gold_last  = gold
                 self._pearl_last = pearl
-            if self._match_count > 0 and self._match_count % 5 == 0:
+            if self._match_count % 3 == 0:
                 print(f"[HOME] Match #{self._match_count} — collecting all resources...")
-                self.adb.tap(*COLLECT_ALL_COORDS)
+                self.adb.tap(*COLLECT_ALL_RESOURCES)
                 time.sleep(0.5)
             print("[HOME] Forge icon found, tapping trophy...")
             self.adb.tap(*TROPHY_COORDS)
@@ -454,7 +459,7 @@ class RR2Bot:
 
             sell = self.vision.find_template(f, "btn_sell", threshold=0.70)
             if sell:
-                melt = self.vision.find_template(f, "btn_melt", threshold=0.70)
+                melt = self.vision.find_template(f, "btn_melt", threshold=0.92)
                 if melt and self._gold_last is not None and self._gold_last > 1_000_000:
                     print(f"[COF] Melt (gold={self._gold_last:,}): {melt}")
                     self.adb.tap(melt[0], melt[1])

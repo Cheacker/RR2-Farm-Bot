@@ -85,6 +85,20 @@ class ADBController:
             return
         self.device.shell(f"input swipe {int(x)} {int(y)} {int(x)} {int(y)} {int(duration_ms)}")
 
+    def quick_screen_check(self):
+        """Single screencap — no reconnect side-effects. Returns True if screen is readable."""
+        if not self.device:
+            return False
+        try:
+            img_bytes = self.device.shell("screencap -p", encoding=None)
+            if not img_bytes:
+                return False
+            nparr = np.frombuffer(img_bytes, np.uint8)
+            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            return img is not None and 5 < img.mean() < 250
+        except Exception:
+            return False
+
     def keyevent(self, key):
         if not self.device:
             return
