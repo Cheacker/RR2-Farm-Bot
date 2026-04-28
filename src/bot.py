@@ -78,6 +78,7 @@ class RR2Bot:
         self._gold_last         = None
         self._pearl_last        = None
         self._main_adb_fail     = 0
+        self._game_load_miss    = 0
         self.db = PlayerDB()
 
     # ── MEmu restart ─────────────────────────────────────────────────────────
@@ -335,6 +336,7 @@ class RR2Bot:
         time.sleep(0.1)
         go_back = self.vision.find_template(screen, "btn_bring_me_back", threshold=0.9)
         if go_back:
+            self._game_load_miss = 0
             self._skip_top += 1
             if self._current_target:
                 self.db.mark_active(self._current_target)
@@ -348,6 +350,7 @@ class RR2Bot:
         time.sleep(0.1)
         archer = self.vision.find_template(screen, "btn_archer", threshold=0.9)
         if archer:
+            self._game_load_miss = 0
             print("[GAME_LOAD] Archer button visible, match started!")
             self._skip_top = 0
             self.adb.tap(*ARCHER_COORDS)
@@ -361,11 +364,19 @@ class RR2Bot:
         if time.time() - self._attack_prep_start > 10:
             big_collect = self.vision.find_template(screen, "big_collect", threshold=0.80)
             if big_collect:
+                self._game_load_miss = 0
                 print("[GAME_LOAD] 10s → btn_collect found, tapping...")
                 self.adb.tap(big_collect[0], big_collect[1])
                 time.sleep(0.5)
                 return
-        print("[GAME_LOAD] Waiting...")
+        self._game_load_miss += 1
+        if self._game_load_miss >= 15:
+            print(f"[GAME_LOAD] Nothing found for {self._game_load_miss} attempts — restarting game...")
+            self._game_load_miss = 0
+            self.adb.restart_game(RR2_PACKAGE)
+            self.state = State.HOME
+            return
+        print(f"[GAME_LOAD] Waiting... ({self._game_load_miss}/15)")
 
     # ── GOING_BACK ────────────────────────────────────────────────────────────
     def handle_going_back(self, screen):
