@@ -15,8 +15,9 @@ MEMU_EXE               = r"D:\Program Files\Microvirt\MEmu\MEmu.exe"
 MEMU_RESTART_INTERVAL  = 3 * 3600  # restart MEmu every 3 hours
 
 # ── Coordinates ──────────────────────────────────────────────────────────────
-TROPHY_COORDS      = (0, 0)      # set with get_coords.py
-BLUE_SEARCH_COORDS = (1436, 213)
+TROPHY_COORDS       = (0, 0)     # set with get_coords.py
+COLLECT_ALL_COORDS  = (0, 0)     # set with get_coords.py
+BLUE_SEARCH_COORDS  = (1436, 213)
 ARCHER_COORDS      = (200, 800)
 CANNON_COORDS      = (240, 800)
 MINUS_LEFT_COORDS  = (810, 226)
@@ -177,6 +178,10 @@ class RR2Bot:
                     self._pearl_start = pearl
                 self._gold_last  = gold
                 self._pearl_last = pearl
+            if self._match_count > 0 and self._match_count % 5 == 0:
+                print(f"[HOME] Match #{self._match_count} — collecting all resources...")
+                self.adb.tap(*COLLECT_ALL_COORDS)
+                time.sleep(0.5)
             print("[HOME] Forge icon found, tapping trophy...")
             self.adb.tap(*TROPHY_COORDS)
             self.state = State.TROPHY_MENU
