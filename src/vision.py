@@ -11,7 +11,7 @@ pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tessera
 NAME_REGION = (-705, -20, 525, 40)
 
 # Templates in this set will NOT print "not found" messages (polled every loop)
-SILENT_ON_MISS = {"btn_continue"}
+SILENT_ON_MISS = {"btn_continue", "btn_melt"}
 
 
 class VisionInterpreter:

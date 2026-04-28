@@ -15,6 +15,7 @@ MEMU_EXE               = r"D:\Program Files\Microvirt\MEmu\MEmu.exe"
 MEMU_RESTART_INTERVAL  = 3 * 3600  # restart MEmu every 3 hours
 
 # ── Coordinates ──────────────────────────────────────────────────────────────
+TROPHY_COORDS      = (0, 0)      # set with get_coords.py
 BLUE_SEARCH_COORDS = (1436, 213)
 ARCHER_COORDS      = (200, 800)
 CANNON_COORDS      = (240, 800)
@@ -164,8 +165,8 @@ class RR2Bot:
 
     # ── HOME ──────────────────────────────────────────────────────────────────
     def handle_home(self, screen):
-        print("[HOME] Searching for trophy icon...")
-        pos = self.vision.find_template(screen, "icon_trophy", 0.90)
+        print("[HOME] Searching for forge icon...")
+        pos = self.vision.find_template(screen, "icon_forge", 0.90)
         if pos:
             self._trophy_miss_count = 0
             gold  = self.vision.read_region_number(screen, 102, 29, 253, 72)
@@ -176,8 +177,8 @@ class RR2Bot:
                     self._pearl_start = pearl
                 self._gold_last  = gold
                 self._pearl_last = pearl
-            print("[HOME] Trophy icon found, tapping...")
-            self.adb.tap(pos[0], pos[1])
+            print("[HOME] Forge icon found, tapping trophy...")
+            self.adb.tap(*TROPHY_COORDS)
             self.state = State.TROPHY_MENU
             time.sleep(0.5)
         else:
@@ -216,7 +217,7 @@ class RR2Bot:
             self.adb.swipe(650, 600, 650, 300, 300)
             time.sleep(0.4)
         self.adb.tap(812, 832)
-        time.sleep(1.2)
+        time.sleep(3.5)
         print(f"List scrolled {times} time(s).")
         self._skip_top = 0
 
@@ -321,7 +322,6 @@ class RR2Bot:
 
     # ── GAME_LOAD ─────────────────────────────────────────────────────────────
     def handle_game_load(self, screen):
-        self.adb.tap(*ARCHER_COORDS)
         time.sleep(0.1)
         go_back = self.vision.find_template(screen, "btn_bring_me_back", threshold=0.9)
         if go_back:
@@ -335,7 +335,6 @@ class RR2Bot:
             self.state = State.GOING_BACK
             time.sleep(0.5)
             return
-        self.adb.tap(*ARCHER_COORDS)
         time.sleep(0.1)
         archer = self.vision.find_template(screen, "btn_archer", threshold=0.9)
         if archer:
@@ -450,8 +449,13 @@ class RR2Bot:
 
             sell = self.vision.find_template(f, "btn_sell", threshold=0.70)
             if sell:
-                print(f"[COF] Sell (1 buttons), tapping leftmost: {sell}")
-                self.adb.tap(sell[0], sell[1])
+                melt = self.vision.find_template(f, "btn_melt", threshold=0.70)
+                if melt and self._gold_last is not None and self._gold_last > 1_000_000:
+                    print(f"[COF] Melt (gold={self._gold_last:,}): {melt}")
+                    self.adb.tap(melt[0], melt[1])
+                else:
+                    print(f"[COF] Sell: {sell}")
+                    self.adb.tap(sell[0], sell[1])
                 missed_chests = 0
                 continue
 
@@ -498,8 +502,13 @@ class RR2Bot:
 
             sell = self.vision.find_template(f, "btn_sell", threshold=0.70)
             if sell:
-                print(f"[COF] Sell (1 buttons), tapping leftmost: {sell}")
-                self.adb.tap(sell[0], sell[1])
+                melt = self.vision.find_template(f, "btn_melt", threshold=0.70)
+                if melt and self._gold_last is not None and self._gold_last > 1_000_000:
+                    print(f"[COF] Melt (gold={self._gold_last:,}): {melt}")
+                    self.adb.tap(melt[0], melt[1])
+                else:
+                    print(f"[COF] Sell: {sell}")
+                    self.adb.tap(sell[0], sell[1])
                 time.sleep(2.25)
                 self._cof_tap_home()
                 return
