@@ -195,7 +195,10 @@ class RR2Bot:
         else:
             self._trophy_miss_count += 1
             if self._trophy_miss_count > 21:
-                self._shutdown(f"home_trophy_miss_{self._trophy_miss_count}")
+                print(f"[HOME] Forge not found after {self._trophy_miss_count} attempts — restarting game...")
+                self._trophy_miss_count = 0
+                self.adb.restart_game(RR2_PACKAGE)
+                self.state = State.HOME
                 return
 
             if self._trophy_miss_count % 2 == 0:
@@ -274,8 +277,10 @@ class RR2Bot:
         if not opponents:
             self._no_opponent_count += 1
             if self._no_opponent_count >= 27:
-                print(f"[FILTERED_RANKS] No sword found after {self._no_opponent_count} attempts, shutting down...")
-                self.running = False
+                print(f"[FILTERED_RANKS] No sword found after {self._no_opponent_count} attempts — restarting game...")
+                self._no_opponent_count = 0
+                self.adb.restart_game(RR2_PACKAGE)
+                self.state = State.HOME
                 return
             if self._no_opponent_count % 9 == 0:
                 attack_btn = self.vision.find_template(screen, "btn_attack_start", threshold=0.5)
@@ -391,8 +396,10 @@ class RR2Bot:
         now = time.time()
 
         if self._in_game_start > 0 and now - self._in_game_start > 180:
-            print("[IN_GAME] 3-minute timeout, shutting down...")
-            self._shutdown("in_game_timeout_3min")
+            print("[IN_GAME] 3-minute timeout — restarting game...")
+            self._in_game_start = 0
+            self.adb.restart_game(RR2_PACKAGE)
+            self.state = State.HOME
             return
         if now - self._last_tap >= 0.65:
             self._last_tap = now
