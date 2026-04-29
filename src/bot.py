@@ -24,7 +24,8 @@ MINUS_LEFT_COORDS  = (810, 226)
 MINUS_RIGHT_COORDS = (1084, 226)
 PLUS_LEFT_COORDS   = (985, 229)
 PLUS_RIGHT_COORDS  = (1258, 226)
-IN_GAME_TAP_COORDS = (1145, 128)
+IN_GAME_TAP_COORDS = (954, 302)
+
 
 class State:
     HOME               = "HOME"
@@ -483,8 +484,9 @@ class RR2Bot:
             sell = self.vision.find_template(f, "btn_sell", threshold=0.70)
             if sell:
                 melt = self.vision.find_template(f, "btn_melt", threshold=0.92)
-                if melt and self._gold_last is not None and self._gold_last > 1_000_000:
-                    print(f"[COF] Melt (gold={self._gold_last:,}): {melt}")
+                gold_ref = self._gold_last if self._gold_last is not None else self._gold_start
+                if melt and (gold_ref is None or gold_ref > 1_000_000):
+                    print(f"[COF] Melt (gold={f'{gold_ref:,}' if gold_ref is not None else '?'}): {melt}")
                     self.adb.tap(melt[0], melt[1])
                 else:
                     print(f"[COF] Sell: {sell}")
@@ -536,8 +538,9 @@ class RR2Bot:
             sell = self.vision.find_template(f, "btn_sell", threshold=0.70)
             if sell:
                 melt = self.vision.find_template(f, "btn_melt", threshold=0.70)
-                if melt and self._gold_last is not None and self._gold_last > 1_000_000:
-                    print(f"[COF] Melt (gold={self._gold_last:,}): {melt}")
+                gold_ref = self._gold_last if self._gold_last is not None else self._gold_start
+                if melt and (gold_ref is None or gold_ref > 1_000_000):
+                    print(f"[COF] Melt (gold={f'{gold_ref:,}' if gold_ref is not None else '?'}): {melt}")
                     self.adb.tap(melt[0], melt[1])
                 else:
                     print(f"[COF] Sell: {sell}")
