@@ -297,8 +297,16 @@ class RR2Bot:
 
         self._no_opponent_count = 0
         opponents.sort(key=lambda pos: pos[1])
-        for sword_pos in opponents:
+        for i, sword_pos in enumerate(opponents):
+            is_last = (i == len(opponents) - 1)
             name = self.vision.read_player_name(screen, sword_pos[0], sword_pos[1])
+            if not name:
+                if is_last:
+                    print("[FILTERED_RANKS] Last opponent name unreadable (partially visible) → scrolling")
+                    self._scroll_list()
+                    return
+                print("[FILTERED_RANKS] Could not read player name → skipping")
+                continue
             active = self.db.is_active(name)
             info   = self.db.info_str(name)
             print(f"Player detected: [{name}], {info}")
