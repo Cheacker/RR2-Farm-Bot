@@ -24,6 +24,7 @@ MINUS_LEFT_COORDS  = (810, 226)
 MINUS_RIGHT_COORDS = (1084, 226)
 PLUS_LEFT_COORDS   = (985, 229)
 PLUS_RIGHT_COORDS  = (1258, 226)
+IN_GAME_TAP_COORDS = (1145, 128)
 
 class State:
     HOME               = "HOME"
@@ -217,7 +218,7 @@ class RR2Bot:
                 if collect:
                     print(f"[HOME] {self._trophy_miss_count}th miss → pressing btn_collect...")
                     self.adb.tap(collect[0], collect[1])
-                    time.sleep(1.5)
+                    time.sleep(3.5)
                     self.adb.tap(1524, 86)
                 else:
                     close = self.vision.find_template(screen, "btn_close", threshold=0.80)
@@ -298,10 +299,6 @@ class RR2Bot:
         opponents.sort(key=lambda pos: pos[1])
         for sword_pos in opponents:
             name = self.vision.read_player_name(screen, sword_pos[0], sword_pos[1])
-            if not name:
-                print("[FILTERED_RANKS] Could not read player name → scroll")
-                self._scroll_list()
-                return
             active = self.db.is_active(name)
             info   = self.db.info_str(name)
             print(f"Player detected: [{name}], {info}")
@@ -403,8 +400,8 @@ class RR2Bot:
             return
         if now - self._last_tap >= 0.65:
             self._last_tap = now
-            self.adb.tap(10, 10)
-            print("Tapped: (10, 10)")
+            self.adb.tap(*IN_GAME_TAP_COORDS)
+            print(f"Tapped: {IN_GAME_TAP_COORDS}")
 
         if screen is not None and now - self._last_end_check >= 4:
             self._last_end_check = now
@@ -564,6 +561,6 @@ if __name__ == "__main__":
     base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     template_dir = os.path.join(base, "En_Templates")
 
-    print(f"Trophy filter: {trophy_filter} (left min: {trophy_filter - 100})")
+    print(f"Trophy filter: {trophy_filter}")
     bot = RR2Bot(port=port, template_dir=template_dir, trophy_filter=trophy_filter)
     bot.loop()
