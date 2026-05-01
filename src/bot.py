@@ -142,8 +142,11 @@ class RR2Bot:
                         print(f"[ADB] No screen for {self._main_adb_fail} attempts — restarting MEmu...")
                         self._restart_memu()
                         self._main_adb_fail = 0
-                    elif self.state == State.IN_GAME:
-                        self.handle_in_game(None)
+                    else:
+                        if self._main_adb_fail % 5 == 1:
+                            print(f"[ADB] Screen unavailable (attempt {self._main_adb_fail}/20, state={self.state})...")
+                        if self.state == State.IN_GAME:
+                            self.handle_in_game(None)
                     time.sleep(0.5)
                     continue
                 self._main_adb_fail = 0
@@ -461,7 +464,7 @@ class RR2Bot:
         time.sleep(1)
         missed_chests = 0
         _adb_fail = 0
-        while self._chest_taps < 3:
+        while self.running and self._chest_taps < 3:
             time.sleep(0.3)
             f = self.adb.current_screen()
             if f is None:
@@ -515,7 +518,7 @@ class RR2Bot:
                     self._chest_taps += 1
 
         _adb_fail = 0
-        while True:
+        while self.running:
             time.sleep(0.3)
             f = self.adb.current_screen()
             if f is None:
