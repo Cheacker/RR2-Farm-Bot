@@ -485,7 +485,7 @@ class RR2Bot:
             if sell:
                 melt = self.vision.find_template(f, "btn_melt", threshold=0.92)
                 gold_ref = self._gold_last if self._gold_last is not None else self._gold_start
-                if melt and (gold_ref is None or gold_ref > 1_000_000):
+                if melt and (gold_ref is None or gold_ref > 23_000_000):
                     print(f"[COF] Melt (gold={f'{gold_ref:,}' if gold_ref is not None else '?'}): {melt}")
                     self.adb.tap(melt[0], melt[1])
                 else:
@@ -539,7 +539,7 @@ class RR2Bot:
             if sell:
                 melt = self.vision.find_template(f, "btn_melt", threshold=0.70)
                 gold_ref = self._gold_last if self._gold_last is not None else self._gold_start
-                if melt and (gold_ref is None or gold_ref > 1_000_000):
+                if melt and (gold_ref is None or gold_ref > 23_000_000):
                     print(f"[COF] Melt (gold={f'{gold_ref:,}' if gold_ref is not None else '?'}): {melt}")
                     self.adb.tap(melt[0], melt[1])
                 else:
