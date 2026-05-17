@@ -16,23 +16,29 @@ class ADBController:
     def _connect(self):
         print(f"Connecting to emulator on port {self._port}...")
         try:
-            self.adb.connect(f"127.0.0.1:{self._port}")
-            time.sleep(0.5)
-            if any(str(self._port) in d.serial for d in self.adb.device_list()):
-                print(f"Connected to emulator on port {self._port}!")
+            subprocess.run(
+                ["adb", "connect", f"127.0.0.1:{self._port}"],
+                capture_output=True, timeout=10
+            )
+            time.sleep(1)
+        except Exception as e:
+            print(f"[ADB] adb connect failed: {e}")
+
+        try:
+            self.adb = adbutils.AdbClient(host="127.0.0.1", port=5037)
+            if self._serial:
+                self.device = self.adb.device(self._serial)
+            else:
+                devices = self.adb.device_list()
+                if not devices:
+                    print("No ADB devices found. Make sure the emulator is running.")
+                    self.device = None
+                else:
+                    self.device = devices[0]
+                    print(f"Connected to device: {self.device.serial}")
         except Exception as e:
             print(f"Connection failed: {e}")
-
-        if self._serial:
-            self.device = self.adb.device(self._serial)
-        else:
-            devices = self.adb.device_list()
-            if not devices:
-                print("No ADB devices found. Make sure the emulator is running.")
-                self.device = None
-            else:
-                self.device = devices[0]
-                print(f"Connected to device: {self.device.serial}")
+            self.device = None
 
     def _reconnect(self):
         print("[ADB] Connection lost — kill-server/start-server...")
@@ -55,7 +61,7 @@ class ADBController:
             return None
         for attempt in range(retries):
             try:
-                img_bytes = self.device.shell("screencap -p", encoding=None)
+                img_bytes = self.device.shell("screencap -p", encoding=None, timeout=15)
                 if not img_bytes:
                     continue
                 nparr = np.frombuffer(img_bytes, np.uint8)
@@ -90,7 +96,7 @@ class ADBController:
         if not self.device:
             return False
         try:
-            img_bytes = self.device.shell("screencap -p", encoding=None)
+            img_bytes = self.device.shell("screencap -p", encoding=None, timeout=15)
             if not img_bytes:
                 return False
             nparr = np.frombuffer(img_bytes, np.uint8)

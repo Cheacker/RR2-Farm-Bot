@@ -16,7 +16,7 @@ import adbutils
 import time
 
 PORT = 21503
-
+TRY_COUNT = 50
 adb = adbutils.AdbClient(host="127.0.0.1", port=5037)
 adb.connect(f"127.0.0.1:{PORT}")
 time.sleep(0.5)
@@ -29,21 +29,21 @@ print(f"Bağlandı: {device.serial}")
 
 
 def capture():
-    for attempt in range(8):
+    for attempt in range(TRY_COUNT):
         try:
             raw = device.shell("screencap -p", encoding=None)
             if not raw or len(raw) < 1000:
-                print(f"  [{attempt+1}/8] Boş response ({len(raw) if raw else 0} bytes)")
+                print(f"  [{attempt+1}/{TRY_COUNT}] Boş response ({len(raw) if raw else 0} bytes)")
                 time.sleep(0.3)
                 continue
             arr = np.frombuffer(raw, np.uint8)
             img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
             mean = img.mean() if img is not None else -1
-            print(f"  [{attempt+1}/8] mean={mean:.1f}")
+            print(f"  [{attempt+1}/{TRY_COUNT}] mean={mean:.1f}")
             if img is not None and mean < 250:
                 return img
         except Exception as e:
-            print(f"  [{attempt+1}/8] Hata: {e}")
+            print(f"  [{attempt+1}/{TRY_COUNT}] Hata: {e}")
         time.sleep(0.3)
     return None
 

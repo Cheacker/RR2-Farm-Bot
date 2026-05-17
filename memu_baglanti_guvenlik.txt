@@ -1,0 +1,253 @@
+RR2 FARM BOT — MEmu BAĞLANTI GÜVENLİK MEKANİZMALARI
+=====================================================
+Kod tabanı: bot.py + controller.py
+Tarih: 2026-05-05
+=====================================================
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. BAŞLANGIÇ — __init__ (bot.py L47–64)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Bot başladığında ADBController oluşturulur ve ilk _connect() çağrılır.
+
+  DURUM A — Cihaz bulundu:
+    → Devam et, MEmu'ya dokunma.
+
+  DURUM B — Cihaz bulunamadı:
+    1. taskkill /F /IM MEmu.exe /T   (zaten açıksa eski/broken MEmu'yu öldür)
+    2. subprocess.Popen([MEMU_EXE])  (sıfırdan başlat)
+    3. 25 saniye bekle               (Android VM'in boot etmesi için)
+    4. _reconnect()                  (ADB server'ı kill + start + yeniden bağlan)
+    5. 90 saniyelik polling: her 5s'de _connect() çağır, device bulunursa dur
+    6. 90s sonunda hâlâ device yok → "ADB connection failed" → exit(1)
+
+  NOT: _memu_just_launched = True olarak işaretlenir (loop()'ta tekrar restart'ı önler).
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2. _connect() — controller.py L16–41
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Temel bağlantı fonksiyonu. Her polling adımında çağrılır.
+
+  1. subprocess "adb connect 127.0.0.1:PORT" çalıştırır (timeout=10s)
+       → ADB server'a "şu adresteki cihaza bağlan" emri verir.
+       → Eski adbutils.connect()'ten daha güvenilir (binary direkt iletişim kurar,
+         yanıtı doğrular, "connected" / "already connected" döner).
+  2. 1 saniye bekler (ADB server bağlantıyı kaydetsin)
+  3. Yeni AdbClient oluşturur → device_list() sorgular
+       → Boşsa: self.device = None
+       → Doluysa: self.device = devices[0], bağlantı log'u basar
+  4. Exception olursa: self.device = None (crash önlenir)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+3. _reconnect() — controller.py L43–56
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ADB server'ı sıfırlayıp yeniden bağlanan agresif versiyon.
+
+  1. adb kill-server  (timeout=5s)    → mevcut ADB sunucusunu öldür
+  2. 1 saniye bekle
+  3. adb start-server (timeout=10s)   → taze ADB sunucusu başlat
+  4. 1 saniye bekle
+  5. Yeni AdbClient oluştur → _connect() çağır
+
+  NEDEN VAR: adb kill-server sonrası veya uzun süre bağlantı olmayınca
+  ADB server stale state'e giriyor. Taze start, MEmu'yu yeniden tanımasını sağlar.
+
+  KULLANILDIĞI YERLER:
+    - current_screen() → device None ise (L59–61)
+    - current_screen() → 4. denemede exception olursa (L76)
+    - bot __init__ → MEmu başlatma sonrası ilk bağlantı girişimi (L58)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+4. current_screen() — controller.py L58–77
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Ana döngünün her iterasyonunda ekranı çeken fonksiyon.
+
+  1. self.device None ise → _reconnect() → None döner (o iterasyon atlanır)
+  2. 4 deneme yapar:
+       a. "screencap -p" shell komutu — timeout=15s
+            → Neden 15s? ADB soket donmasında sonsuz beklemeyi önler.
+       b. Gelen byte'ları OpenCV'ye decode eder
+       c. 5 < img.mean() < 250 kontrolü:
+            → mean ≤ 5:  ekran tamamen siyah (ADB bağlı ama Android donmuş)
+            → mean ≥ 250: ekran tamamen beyaz (yükleniyor veya donmuş)
+            → İkisi de geçersiz sayılır, tekrar dener
+  3. 4. denemede exception olursa → _reconnect()
+  4. 4 deneme sonunda geçerli frame yoksa → None döner
+
+  SONUÇ: None döndüğünde ana döngü _main_adb_fail sayacını artırır.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+5. quick_screen_check() — controller.py L94–106
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Tek seferlik, yan etkisiz ekran kontrolü. current_screen()'den farklı olarak
+reconnect tetiklemez.
+
+  - Tek screencap dener
+  - 5 < img.mean() < 250 → True (ekran okunabilir)
+  - Exception veya kötü frame → False
+  - device None ise → False
+
+  NEDEN AYRI: _restart_memu() polling sırasında _reconnect() çağrısı
+  MEmu'nun kendi ADB başlatma sürecini bozabilir. quick_screen_check()
+  bu riski almaz.
+
+  KULLANILDIĞI YERLER:
+    - loop() başlangıcı: 3h kontrolünde MEmu sağlıklı mı?  (L141)
+    - _restart_memu(): eski kodda polling için kullanılıyordu (artık kaldırıldı)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+6. loop() BAŞLANGIÇ KONTROLLERI (bot.py L130–148)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Bot loop()'a girdiğinde tek seferlik yapılan karar ağacı:
+
+  DURUM A — _memu_just_launched = True:
+    → __init__'te MEmu az önce başlatıldı
+    → DB'ye "MEmu şimdi restart edildi" yaz
+    → Oyunu başlat (restart_game)
+    → MEmu'ya dokunma (zaten yeni)
+
+  DURUM B — last_restart = None (DB'de kayıt yok):
+    → Bot ilk kez çalışıyor
+    → DB'ye timestamp yaz
+    → Oyunu başlat
+
+  DURUM C — last_restart >= 3 SAAT:
+    → quick_screen_check() çağır:
+        True  → MEmu sağlıklı, sadece timestamp güncelle + oyunu başlat
+        False → _restart_memu() (MEmu bozuk, sıfırla)
+
+  DURUM D — last_restart < 3 saat:
+    → Normal devam, sadece oyunu başlat (restart_game)
+
+  AMAÇ: Her bot başlatışında MEmu'nun 3 saatte bir temizlenmesi,
+  ama sağlıklı MEmu gereksiz yere kapatılmasın.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+7. _main_adb_fail SAYACI (bot.py L152–165)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Ana döngüde current_screen() None döndüğünde artar.
+
+  Her başarısız screencap → _main_adb_fail += 1
+
+  5, 10, 15 (5'in katlarında):   log basar — "Screen unavailable (X/20)"
+  IN_GAME state'deyse:           ekran None olsa bile tap'a devam eder
+                                 (oyun bitene kadar tıklamayı kesmemek için)
+  20'ye ulaşınca:                _restart_memu() — MEmu tamamen öldü sayılır
+                                 ardından sayaç sıfırlanır
+
+  Başarılı screen alınınca:      sıfırlanır
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+8. HOME STATE'DE İKİNCİ 3H KONTROLÜ (bot.py L168–171)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Ana döngüde, her HOME iterasyonunda ayrıca bir 3h kontrolü yapılır.
+
+  if state == HOME:
+      last_restart = db.get_last_memu_restart() or self._start_time
+      if time.time() - last_restart >= 3 saat:
+          _restart_memu()
+
+  FARK: loop() başlangıcındaki check'ten farklı — burada quick_screen_check()
+  yapılmaz, doğrudan restart edilir.
+
+  AMAÇ: Bot uzun süre çalışırken (>=3 saat) HOME'a döndüğünde MEmu'yu
+  temizlemek. Periyodik temizlik noktası.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+9. _restart_memu() — bot.py L95–116
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+MEmu'yu tamamen kapat-aç, bağlantıyı yenile.
+
+  1. taskkill /F /IM MEmu.exe /T   → MEmu'yu zorla kapat
+  2. 5 saniye bekle
+  3. subprocess.Popen([MEMU_EXE])  → MEmu'yu başlat
+  4. 20 saniye bekle               → Android boot için
+  5. 75 saniyelik polling:
+       _connect() → device bağlandıysa → "MEmu is ready" → dur
+       her 5s'de tekrar
+     75s sonunda device yok → "Timeout" log'u (ama devam eder)
+  6. DB'ye timestamp yaz (set_last_memu_restart)
+  7. restart_game() — RR2 uygulamasını yeniden başlat
+  8. state = HOME, _main_adb_fail = 0
+
+  TETIKLENDIĞI YERLER:
+    - bot __init__: ilk bağlantıda cihaz bulunamazsa
+    - loop() başlangıcı: 3h geçmiş + quick_screen_check False
+    - HOME state: 3h geçmiş (ikinci kontrol)
+    - _main_adb_fail = 20
+    - COF döngüleri 1 ve 2: _adb_fail = 20
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+10. COF _adb_fail SAYACI (bot.py L499–509, L557–563)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Chamber of Fortune'da iki ayrı while döngüsü vardır. Her birinde
+bağımsız bir yerel _adb_fail sayacı bulunur.
+
+  Her başarısız screencap → _adb_fail += 1
+  20'ye ulaşınca           → _restart_memu() → return (COF'tan çık)
+
+  NEDEN AYRI: COF döngüleri ana loop'tan bağımsız çalışır (kendi while'ları var).
+  Ana döngüdeki _main_adb_fail bu scope'a erişemez.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+11. OYUN RESTART (MEmu KAPATMADAN) — restart_game()
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+MEmu açık kalır, sadece RR2 uygulaması kapatılıp açılır.
+"am force-stop" + "monkey -p ... LAUNCHER" → 5s bekleme
+
+  TETIKLENDIĞI DURUMLAR (state bazında):
+
+  HOME → _trophy_miss_count > 21:
+    21 iterasyonda forge ikonu bulunamadı.
+    Araya giren yardımcı kontroller: her 2'de (10,10) tap,
+    her 6'da btn_close + btn_big_collect, her 5'te btn_collect.
+
+  FILTERED_RANKS → _no_opponent_count >= 27:
+    27 iterasyonda kılıç ikonu bulunamadı.
+    Araya giren: her 3'te scroll, her 9'da btn_attack_start kontrolü.
+
+  GAME_LOAD → _game_load_miss >= 15:
+    15 iterasyonda hiçbir beklenen buton (video/back/archer) bulunamadı.
+
+  IN_GAME → 3 dakika timeout:
+    Oyun içinde 180 saniye geçti, maç bitmedi.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ÖZET — HANGİ SORUN HARİ DURUM
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Sorun                           → Tepki
+─────────────────────────────────────────────────────
+Bot başlarken MEmu kapalı       → __init__ MEmu'yu kapat+aç, 90s bekle
+Bot başlarken 3h geçmiş,        → loop() başlangıcı: quick_screen_check
+  MEmu açık ve sağlıklı            True → sadece timestamp + restart_game
+  MEmu açık ama bozuk              False → _restart_memu()
+Bot çalışırken ekran alınamıyor → _main_adb_fail: 5'te log, 20'de _restart_memu
+COF içinde ekran alınamıyor     → _adb_fail: 20'de _restart_memu
+HOME'da 3h doldu                → _restart_memu (quick_screen_check YOK)
+Oyun donar / forge ikonu yok    → restart_game (21 miss)
+Listede rakip yok               → restart_game (27 miss)
+Yükleme ekranı takılır          → restart_game (15 miss)
+Maç 3 dakika bitmez             → restart_game (180s timeout)

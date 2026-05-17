@@ -15,7 +15,7 @@ MEMU_EXE               = r"D:\Program Files\Microvirt\MEmu\MEmu.exe"
 MEMU_RESTART_INTERVAL  = 3 * 3600  # restart MEmu every 3 hours
 
 # ── Coordinates ──────────────────────────────────────────────────────────────
-TROPHY_COORDS       = (1545, 128)     # set with get_coords.py
+TROPHY_COORDS       = (1546, 114)     # set with get_coords.py
 COLLECT_ALL_RESOURCES  = (60, 506)     # set with get_coords.py
 BLUE_SEARCH_COORDS  = (1436, 213)
 ARCHER_COORDS      = (200, 800)
@@ -24,7 +24,12 @@ MINUS_LEFT_COORDS  = (810, 226)
 MINUS_RIGHT_COORDS = (1084, 226)
 PLUS_LEFT_COORDS   = (985, 229)
 PLUS_RIGHT_COORDS  = (1258, 226)
-IN_GAME_TAP_COORDS = (954, 302)
+IN_GAME_TAP_COORDS = (1130, 274)
+GEAR_SET_1_COORDS  = (226, 818)
+GEAR_SET_2_COORDS  = (298, 820)
+GEAR_SET_3_COORDS  = (366, 818)
+VIDEO_CLOSE_COORDS = (1522, 94)    
+SHOP_COORDS        = (1540, 508)    
 
 
 class State:
@@ -39,20 +44,23 @@ class State:
 
 
 class RR2Bot:
-    def __init__(self, port=21503, template_dir=None, trophy_filter=600):
+    def __init__(self, port=21503, template_dir=None, trophy_filter=600, melt_threshold=1_000_000):
         self.adb = ADBController(port=port)
         self._memu_just_launched = False
         if not self.adb.device:
-            print("[MEMU] No ADB device — launching MEmu...")
+            print("[MEMU] No ADB device — killing any existing MEmu and launching fresh...")
+            subprocess.run(["taskkill", "/F", "/IM", "MEmu.exe", "/T"], capture_output=True)
+            time.sleep(3)
             subprocess.Popen([MEMU_EXE])
             self._memu_just_launched = True
-            print("[MEMU] Waiting for MEmu ADB to be ready...")
-            time.sleep(15)
-            deadline = time.time() + 75
+            print("[MEMU] Waiting for MEmu to boot...")
+            time.sleep(20)
+            self.adb._reconnect()
+            deadline = time.time() + 90
             while time.time() < deadline:
-                self.adb._connect()
                 if self.adb.device:
                     break
+                self.adb._connect()
                 time.sleep(5)
         if not self.adb.device:
             print("ADB connection failed.")
@@ -75,6 +83,7 @@ class RR2Bot:
         self._trophy_miss_count = 0
         self._in_game_start     = 0
         self._trophy_filter     = trophy_filter
+        self._melt_threshold    = melt_threshold
         self._gold_start        = None
         self._pearl_start       = None
         self._gold_last         = None
@@ -90,12 +99,13 @@ class RR2Bot:
         time.sleep(5)
         print(f"[MEMU] Launching: {MEMU_EXE}")
         subprocess.Popen([MEMU_EXE])
+        self.db.set_last_memu_restart()
         print("[MEMU] Waiting for MEmu ADB to be ready...")
         time.sleep(20)
         deadline = time.time() + 75
         while time.time() < deadline:
             self.adb._connect()
-            if self.adb.device and self.adb.quick_screen_check():
+            if self.adb.device:
                 print("[MEMU] MEmu is ready.")
                 break
             time.sleep(5)
@@ -130,7 +140,12 @@ class RR2Bot:
             self.db.set_last_memu_restart()
             self.adb.restart_game(RR2_PACKAGE)
         elif time.time() - last_restart >= MEMU_RESTART_INTERVAL:
-            self._restart_memu()
+            if self.adb.device:
+                print("[MEMU] 3h interval — MEmu healthy, skipping restart.")
+                self.db.set_last_memu_restart()
+                self.adb.restart_game(RR2_PACKAGE)
+            else:
+                self._restart_memu()
         else:
             self.adb.restart_game(RR2_PACKAGE)
         while self.running:
@@ -216,6 +231,19 @@ class RR2Bot:
                     print("[HOME] Pressing btn_close...")
                     self.adb.tap(close[0], close[1])
                     time.sleep(0.5)
+                    
+                btn_big_collect = self.vision.find_template(screen, "btn_big_collect", threshold=0.80)
+                if btn_big_collect:
+                    print("[HOME] btn_big_collect found, tapping...")
+                    self.adb.tap(btn_big_collect[0], btn_big_collect[1])
+                    time.sleep(0.5)
+
+            if self._trophy_miss_count % 10 == 0:
+                league = self.vision.find_template(screen, "btn_collect_league", threshold=0.80)
+                if league:
+                    print(f"[HOME] {self._trophy_miss_count}th miss → pressing btn_collect_league...")
+                    self.adb.tap(league[0], league[1])
+                    time.sleep(1.0)
 
             if self._trophy_miss_count % 5 == 0:
                 collect = self.vision.find_template(screen, "btn_collect", threshold=0.80)
@@ -236,7 +264,7 @@ class RR2Bot:
             self.adb.swipe(650, 600, 650, 300, 300)
             time.sleep(0.4)
         self.adb.tap(812, 832)
-        time.sleep(3.5)
+        time.sleep(5)
         print(f"List scrolled {times} time(s).")
         self._skip_top = 0
 
@@ -336,6 +364,8 @@ class RR2Bot:
         pos = self.vision.find_template(screen, "btn_attack_start", threshold=0.9)
         if pos:
             print("[ATTACK_PREP] Attack button found, pressing → GAME_LOAD...")
+            self.adb.tap(*GEAR_SET_3_COORDS)
+            time.sleep(0.1)
             self.adb.tap(pos[0], pos[1])
             self.state = State.GAME_LOAD
             time.sleep(0.2)
@@ -348,6 +378,27 @@ class RR2Bot:
     # ── GAME_LOAD ─────────────────────────────────────────────────────────────
     def handle_game_load(self, screen):
         time.sleep(0.1)
+        self.adb.tap(*CANNON_COORDS)
+        video_btn = self.vision.find_template(screen, "btn_video", threshold=0.90)
+        if video_btn:
+            print("[GAME_LOAD] Video/food offer detected → buying food...")
+            self.adb.tap(*VIDEO_CLOSE_COORDS)
+            time.sleep(0.5)
+            self.adb.tap(*SHOP_COORDS)
+            time.sleep(1.5)
+            f = self.adb.current_screen()
+            if f is not None:
+                food_btn = self.vision.find_template(f, "btn_food", threshold=0.90)
+                if food_btn:
+                    print("[GAME_LOAD] Food found, buying...")
+                    self.adb.tap(food_btn[0], food_btn[1])
+                    time.sleep(1)
+                else:
+                    print("[GAME_LOAD] Food button not found in shop.")
+            self.adb.tap(*VIDEO_CLOSE_COORDS)
+            time.sleep(0.5)
+            self.state = State.HOME
+            return
         go_back = self.vision.find_template(screen, "btn_bring_me_back", threshold=0.9)
         if go_back:
             self._game_load_miss = 0
@@ -374,15 +425,7 @@ class RR2Bot:
             self.adb.tap(*CANNON_COORDS)
             self._in_game_start = time.time()
             self.state = State.IN_GAME
-            return
-        if time.time() - self._attack_prep_start > 10:
-            big_collect = self.vision.find_template(screen, "big_collect", threshold=0.80)
-            if big_collect:
-                self._game_load_miss = 0
-                print("[GAME_LOAD] 10s → btn_collect found, tapping...")
-                self.adb.tap(big_collect[0], big_collect[1])
-                time.sleep(0.5)
-                return
+            return 
         self._game_load_miss += 1
         if self._game_load_miss >= 15:
             print(f"[GAME_LOAD] Nothing found for {self._game_load_miss} attempts — restarting game...")
@@ -488,7 +531,7 @@ class RR2Bot:
             if sell:
                 melt = self.vision.find_template(f, "btn_melt", threshold=0.92)
                 gold_ref = self._gold_last if self._gold_last is not None else self._gold_start
-                if melt and (gold_ref is None or gold_ref > 23_000_000):
+                if melt and (gold_ref is None or gold_ref > self._melt_threshold):
                     print(f"[COF] Melt (gold={f'{gold_ref:,}' if gold_ref is not None else '?'}): {melt}")
                     self.adb.tap(melt[0], melt[1])
                 else:
@@ -542,7 +585,7 @@ class RR2Bot:
             if sell:
                 melt = self.vision.find_template(f, "btn_melt", threshold=0.70)
                 gold_ref = self._gold_last if self._gold_last is not None else self._gold_start
-                if melt and (gold_ref is None or gold_ref > 23_000_000):
+                if melt and (gold_ref is None or gold_ref > self._melt_threshold):
                     print(f"[COF] Melt (gold={f'{gold_ref:,}' if gold_ref is not None else '?'}): {melt}")
                     self.adb.tap(melt[0], melt[1])
                 else:
@@ -561,20 +604,25 @@ class RR2Bot:
 
 if __name__ == "__main__":
     args = sys.argv[1:]
-    port          = 21503
-    trophy_filter = 600
+    port            = 21503
+    trophy_filter   = 600
+    melt_threshold  = 1_000_000
 
     for arg in args:
-        if arg.isdigit():
+        if arg == 'g':
+            melt_threshold = 24_000_000
+        elif arg.isdigit():
             val = int(arg)
             if 600 <= val <= 3500:
                 trophy_filter = val
+            elif 1_000_000 <= val <= 30_000_000:
+                melt_threshold = val
             else:
                 port = val
 
     base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     template_dir = os.path.join(base, "En_Templates")
 
-    print(f"Trophy filter: {trophy_filter}")
-    bot = RR2Bot(port=port, template_dir=template_dir, trophy_filter=trophy_filter)
+    print(f"Trophy filter: {trophy_filter} | Melt threshold: {melt_threshold:,}")
+    bot = RR2Bot(port=port, template_dir=template_dir, trophy_filter=trophy_filter, melt_threshold=melt_threshold)
     bot.loop()

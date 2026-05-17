@@ -11,22 +11,28 @@ import os
 import time
 
 PORT = 21503  # Change to match your emulator ADB port
-
+TRY_COUNT = 50
 SESSIONS = {
-    "1":  ("Trophy icon (home screen)",               ["icon_trophy"]),
-    "2":  ("Yellow search button*",                    ["btn_start_search"]),
-    "3":  ("Sword / attack icon (ranked list)",       ["area_top_opponent"]),
-    "4":  ("Attack start button (pre-match screen)",  ["btn_attack_start"]),
-    "5":  ("Continue button*",                         ["btn_continue"]),
-    "6":  ("Sell button*",                             ["btn_sell"]),
-    "7":  ("Give up button*",                          ["btn_give_up"]),
-    "8-13": ("Chests (6 separate crops)",               ["chest_1","chest_2","chest_3","chest_4","chest_5","chest_6"]),
-    "14": ("Archer button (appears when match starts)",["btn_archer"]),
-    "15": ("Bring me back button (active player warning)*", ["btn_bring_me_back"]),
-    "16": ("Green back button",                       ["btn_green_back"]),
-    "17": ("Collect button (appears on home screen for vouchers)*", ["btn_collect"]),
-    "18": ("Big collect button (appears after attack prep for breads)*", ["big_collect"]),
-    "19": ("Close / X button*",                        ["btn_close"]),
+    "1":  ("Trophy icon (home screen)",                 ["icon_trophy"]),
+    "2":  ("Yellow search button",                      ["btn_start_search"]),
+    "3":  ("Sword / attack icon (ranked list)",         ["area_top_opponent"]),
+    "4":  ("Attack start button (pre-match screen)",    ["btn_attack_start"]),
+    "5":  ("Continue button",                            ["btn_continue"]),
+    "6":  ("Sell button",                                ["btn_sell"]),
+    "7":  ("Give up button",                             ["btn_give_up"]),
+    "8-13": ("Chests (6 separate crops)",                 ["chest_1","chest_2","chest_3","chest_4","chest_5","chest_6"]),
+    "14": ("Archer button (appears when match starts)",     ["btn_archer"]),
+    "15": ("Bring me back button (active player warning)",  ["btn_bring_me_back"]),
+    "16": ("Green back button",                             ["btn_green_back"]),
+    "17": ("Collect button (appears on home screen for vouchers)",      ["btn_collect"]),
+    "18": ("Big collect button (appears after attack prep for breads)",     ["btn_big_collect"]),
+    "19": ("Close / X button",                                              ["btn_close"]),
+    "20": ("Forge All Button (Home Screen)",                                ["icon_forge"]),
+    "21": ("Melt Button (COF)",                                         ["btn_melt"]),
+    "22": ("Video Button(After After Clicking attack, insufficient breads)", ["btn_video"]),
+    "23": ("Shop food icon",                                         ["btn_food"]),
+    "24": ("League collect button (home screen)",                    ["btn_collect_league"])
+
 }
 
 SAVE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "En_Templates")
@@ -78,18 +84,18 @@ while True:
     time.sleep(1.5)
 
     screen = None
-    for attempt in range(8):
+    for attempt in range(TRY_COUNT):
         img_bytes = device.shell("screencap -p", encoding=None)
         nparr = np.frombuffer(img_bytes, np.uint8)
         img   = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         if img is not None and img.mean() < 250:
             screen = img
             break
-        print(f"  Blank/white frame ({attempt+1}/8), retrying...")
+        print(f"  Blank/white frame ({attempt+1}/{TRY_COUNT}), retrying...")
         time.sleep(0.2)
 
     if screen is None:
-        print("Screenshot failed (8 attempts, all white). Try again.")
+        print(f"Screenshot failed ({TRY_COUNT} attempts, all white). Try again.")
         continue
 
     print(f"Screenshot captured: {screen.shape[1]}x{screen.shape[0]}")
