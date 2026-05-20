@@ -90,7 +90,7 @@ class RR2Bot:
         self._pearl_last        = None
         self._game_load_miss    = 0
         self.db = PlayerDB()
-        self._is_fresh_start = True
+
 
     # ── MEmu restart ─────────────────────────────────────────────────────────
     def _restart_memu(self):
@@ -255,29 +255,29 @@ class RR2Bot:
     def handle_trophy_menu(self, screen):
         yellow = self.vision.find_template(screen, "btn_start_search", threshold=0.95)
         if yellow:
-            if self._is_fresh_start:
-                val_left  = self.vision.read_region_number(screen, 850, 212, 948, 250)
-                val_right = self.vision.read_region_number(screen, 1122, 209, 1218, 252)
-                print(f"[TROPHY_MENU] OCR → left={val_left}, right={val_right}")
+        
+            val_left  = self.vision.read_region_number(screen, 850, 212, 948, 250)
+            val_right = self.vision.read_region_number(screen, 1122, 209, 1218, 252)
+            print(f"[TROPHY_MENU] OCR → left={val_left}, right={val_right}")
 
-                if val_left is None or val_right is None:
-                    print(f"[TROPHY_MENU] OCR failed (left={val_left}, right={val_right}), skipping adjustment")
-                else:
-                    left_presses  = max(0, (val_left  - (300)) // 100)
-                    right_delta   = (val_right - self._trophy_filter) // 100
-                    if left_presses or right_delta != 0:
-                        print(f"[TROPHY_MENU] Adjusting: left -{left_presses}x, right -{right_delta}x")
-                    for _ in range(left_presses):
-                        self.adb.tap(*MINUS_LEFT_COORDS)
+            if val_left is None or val_right is None:
+                print(f"[TROPHY_MENU] OCR failed (left={val_left}, right={val_right}), skipping adjustment")
+            else:
+                left_presses  = max(0, (val_left  - (300)) // 100)
+                right_delta   = (val_right - self._trophy_filter) // 100
+                if left_presses or right_delta != 0:
+                    print(f"[TROPHY_MENU] Adjusting: left -{left_presses}x, right -{right_delta}x")
+                for _ in range(left_presses):
+                    self.adb.tap(*MINUS_LEFT_COORDS)
+                    time.sleep(0.15)
+                if right_delta > 0:
+                    for _ in range(right_delta):
+                        self.adb.tap(*MINUS_RIGHT_COORDS)
                         time.sleep(0.15)
-                    if right_delta > 0:
-                        for _ in range(right_delta):
-                            self.adb.tap(*MINUS_RIGHT_COORDS)
-                            time.sleep(0.15)
-                    elif right_delta < 0:
-                        for _ in range(-right_delta):
-                            self.adb.tap(*PLUS_RIGHT_COORDS)
-                            time.sleep(0.15)
+                elif right_delta < 0:
+                    for _ in range(-right_delta):
+                        self.adb.tap(*PLUS_RIGHT_COORDS)
+                        time.sleep(0.15)
 
             print("[TROPHY_MENU] Search button found, adjusting filters then tapping...")
             self.adb.tap(yellow[0], yellow[1])
@@ -475,7 +475,6 @@ class RR2Bot:
         self._chest_taps    = 0
         self._current_target = None
         self._scroll_count  = 0
-        self._is_fresh_start = False
         self.state = State.HOME
         time.sleep(1)
 
