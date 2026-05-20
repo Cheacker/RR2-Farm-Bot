@@ -88,9 +88,9 @@ class RR2Bot:
         self._pearl_start       = None
         self._gold_last         = None
         self._pearl_last        = None
-        self._main_adb_fail     = 0
         self._game_load_miss    = 0
         self.db = PlayerDB()
+        self._is_fresh_start = True
 
     # ── MEmu restart ─────────────────────────────────────────────────────────
     def _restart_memu(self):
@@ -114,7 +114,6 @@ class RR2Bot:
         self.db.set_last_memu_restart()
         self.adb.restart_game(RR2_PACKAGE)
         self.state = State.HOME
-        self._main_adb_fail = 0
         print("[MEMU] Restart complete.")
 
     # ── Shutdown helper ───────────────────────────────────────────────────────
@@ -140,31 +139,15 @@ class RR2Bot:
             self.db.set_last_memu_restart()
             self.adb.restart_game(RR2_PACKAGE)
         elif time.time() - last_restart >= MEMU_RESTART_INTERVAL:
-            if self.adb.device:
-                print("[MEMU] 3h interval — MEmu healthy, skipping restart.")
-                self.db.set_last_memu_restart()
-                self.adb.restart_game(RR2_PACKAGE)
-            else:
-                self._restart_memu()
+            self._restart_memu()
         else:
             self.adb.restart_game(RR2_PACKAGE)
         while self.running:
             try:
                 screen = self.adb.current_screen()
                 if screen is None:
-                    self._main_adb_fail += 1
-                    if self._main_adb_fail >= 20:
-                        print(f"[ADB] No screen for {self._main_adb_fail} attempts — restarting MEmu...")
-                        self._restart_memu()
-                        self._main_adb_fail = 0
-                    else:
-                        if self._main_adb_fail % 5 == 1:
-                            print(f"[ADB] Screen unavailable (attempt {self._main_adb_fail}/20, state={self.state})...")
-                        if self.state == State.IN_GAME:
-                            self.handle_in_game(None)
-                    time.sleep(0.5)
+                    time.sleep(0.1)
                     continue
-                self._main_adb_fail = 0
 
                 if self.state == State.HOME:
                     last_restart = self.db.get_last_memu_restart() or self._start_time
@@ -272,28 +255,29 @@ class RR2Bot:
     def handle_trophy_menu(self, screen):
         yellow = self.vision.find_template(screen, "btn_start_search", threshold=0.95)
         if yellow:
-            val_left  = self.vision.read_region_number(screen, 850, 212, 948, 250)
-            val_right = self.vision.read_region_number(screen, 1122, 209, 1218, 252)
-            print(f"[TROPHY_MENU] OCR → left={val_left}, right={val_right}")
+            if self._is_fresh_start:
+                val_left  = self.vision.read_region_number(screen, 850, 212, 948, 250)
+                val_right = self.vision.read_region_number(screen, 1122, 209, 1218, 252)
+                print(f"[TROPHY_MENU] OCR → left={val_left}, right={val_right}")
 
-            if val_left is None or val_right is None:
-                print(f"[TROPHY_MENU] OCR failed (left={val_left}, right={val_right}), skipping adjustment")
-            else:
-                left_presses  = max(0, (val_left  - (300)) // 100)
-                right_delta   = (val_right - self._trophy_filter) // 100
-                if left_presses or right_delta != 0:
-                    print(f"[TROPHY_MENU] Adjusting: left -{left_presses}x, right -{right_delta}x")
-                for _ in range(left_presses):
-                    self.adb.tap(*MINUS_LEFT_COORDS)
-                    time.sleep(0.15)
-                if right_delta > 0:
-                    for _ in range(right_delta):
-                        self.adb.tap(*MINUS_RIGHT_COORDS)
+                if val_left is None or val_right is None:
+                    print(f"[TROPHY_MENU] OCR failed (left={val_left}, right={val_right}), skipping adjustment")
+                else:
+                    left_presses  = max(0, (val_left  - (300)) // 100)
+                    right_delta   = (val_right - self._trophy_filter) // 100
+                    if left_presses or right_delta != 0:
+                        print(f"[TROPHY_MENU] Adjusting: left -{left_presses}x, right -{right_delta}x")
+                    for _ in range(left_presses):
+                        self.adb.tap(*MINUS_LEFT_COORDS)
                         time.sleep(0.15)
-                elif right_delta < 0:
-                    for _ in range(-right_delta):
-                        self.adb.tap(*PLUS_RIGHT_COORDS)
-                        time.sleep(0.15)
+                    if right_delta > 0:
+                        for _ in range(right_delta):
+                            self.adb.tap(*MINUS_RIGHT_COORDS)
+                            time.sleep(0.15)
+                    elif right_delta < 0:
+                        for _ in range(-right_delta):
+                            self.adb.tap(*PLUS_RIGHT_COORDS)
+                            time.sleep(0.15)
 
             print("[TROPHY_MENU] Search button found, adjusting filters then tapping...")
             self.adb.tap(yellow[0], yellow[1])
@@ -491,6 +475,7 @@ class RR2Bot:
         self._chest_taps    = 0
         self._current_target = None
         self._scroll_count  = 0
+        self._is_fresh_start = False
         self.state = State.HOME
         time.sleep(1)
 
@@ -506,18 +491,11 @@ class RR2Bot:
     def handle_chamber_of_fortune(self, screen):
         time.sleep(1)
         missed_chests = 0
-        _adb_fail = 0
         while self.running and self._chest_taps < 3:
-            time.sleep(0.3)
+            time.sleep(0.1)
             f = self.adb.current_screen()
             if f is None:
-                _adb_fail += 1
-                if _adb_fail >= 20:
-                    print("[COF] ADB lost — restarting MEmu...")
-                    self._restart_memu()
-                    return
                 continue
-            _adb_fail = 0
 
             pes = self.vision.find_template(f, "btn_give_up", threshold=0.70)
             if pes:
@@ -560,18 +538,11 @@ class RR2Bot:
                 if new_count == 6 - (self._chest_taps + 1):
                     self._chest_taps += 1
 
-        _adb_fail = 0
         while self.running:
-            time.sleep(0.3)
+            time.sleep(0.1)
             f = self.adb.current_screen()
             if f is None:
-                _adb_fail += 1
-                if _adb_fail >= 20:
-                    print("[COF] ADB lost — restarting MEmu...")
-                    self._restart_memu()
-                    return
                 continue
-            _adb_fail = 0
 
             pes = self.vision.find_template(f, "btn_give_up", threshold=0.70)
             if pes:

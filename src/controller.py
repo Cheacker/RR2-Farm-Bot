@@ -57,7 +57,6 @@ class ADBController:
 
     def current_screen(self, retries=4):
         if not self.device:
-            self._reconnect()
             return None
         for attempt in range(retries):
             try:
@@ -72,8 +71,6 @@ class ADBController:
                     time.sleep(0.15)
             except Exception as e:
                 print(f"Failed to capture screen: {e}")
-                if attempt == retries - 1:
-                    self._reconnect()
         return None
 
     def tap(self, x, y):
