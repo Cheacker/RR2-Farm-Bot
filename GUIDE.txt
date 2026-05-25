@@ -26,8 +26,8 @@ running on your PC:
     the game and continue from the beginning of the loop.
 
   It can run for extended sessions (~85 attacks in 3 hours).
-  With ~50% luck bonus it can generate 3.5 million gold and 750 pearls
-  (with Hans) per hour. Increase bread cost reduction, crit chance, and
+  With with high cof luck and pearl bonus, it can generate 1 million gold and 3500 pearls/7 million gold
+  and 2250 pearls per hour. Increase bread cost reduction, crit chance, and
   CoF pearl bonus for maximum benefit.
 
 The bot runs entirely on your local machine. It does not connect to any
@@ -291,5 +291,8 @@ Template capture checklist (use recrop.py menu numbers):
    17. btn_collect
    18. big_collect
    19. btn_close
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   20. icon_forge
+   21. btn_melt
+   22. btn_video
+   23. btn_melt
+   24. btn_collect_league
