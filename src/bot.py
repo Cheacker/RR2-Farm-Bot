@@ -587,6 +587,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Validate ranges
+    if not (20000 <= args.port <= 22000):
+        parser.error(f"--port must be between 20000 and 22000, got {args.port}")
     if not (400 <= args.trophy_filter <= 4000):
         parser.error(f"--trophy-filter must be between 400 and 4000, got {args.trophy_filter}")
     if not (100_000 <= args.gold <= 32_000_000):
