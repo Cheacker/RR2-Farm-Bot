@@ -1,6 +1,6 @@
-import sys
 import time
 import os
+import argparse
 import subprocess
 import cv2
 from controller import ADBController
@@ -44,7 +44,7 @@ class State:
 
 
 class RR2Bot:
-    def __init__(self, port=21503, template_dir=None, trophy_filter=600, melt_threshold=1_000_000):
+    def __init__(self, port=21503, template_dir=None, trophy_filter=600, melt_threshold=1_000_000, drop_trophies=False):
         self.adb = ADBController(port=port)
         self._memu_just_launched = False
         if not self.adb.device:
@@ -84,6 +84,8 @@ class RR2Bot:
         self._in_game_start     = 0
         self._trophy_filter     = trophy_filter
         self._melt_threshold    = melt_threshold
+        self._drop_trophies     = drop_trophies
+        self._in_game_timeout   = 3 if drop_trophies else 180
         self._gold_start        = None
         self._pearl_start       = None
         self._gold_last         = None
@@ -369,7 +371,7 @@ class RR2Bot:
             self.adb.tap(*VIDEO_CLOSE_COORDS)
             time.sleep(0.5)
             self.adb.tap(*SHOP_COORDS)
-            time.sleep(1.5)
+            time.sleep(7)
             f = self.adb.current_screen()
             if f is not None:
                 food_btn = self.vision.find_template(f, "btn_food", threshold=0.90)
@@ -431,8 +433,8 @@ class RR2Bot:
     def handle_in_game(self, screen):
         now = time.time()
 
-        if self._in_game_start > 0 and now - self._in_game_start > 180:
-            print("[IN_GAME] 3-minute timeout — restarting game...")
+        if self._in_game_start > 0 and now - self._in_game_start > self._in_game_timeout:
+            print(f"[IN_GAME] {self._in_game_timeout}s timeout — restarting game...")
             self._in_game_start = 0
             self.adb.restart_game(RR2_PACKAGE)
             self.state = State.HOME
@@ -573,26 +575,32 @@ class RR2Bot:
 
 
 if __name__ == "__main__":
-    args = sys.argv[1:]
-    port            = 21503
-    trophy_filter   = 600
-    melt_threshold  = 1_000_000
+    parser = argparse.ArgumentParser(description="Royal Revolt 2 Farm Bot")
+    parser.add_argument("--port", type=int, default=21503,
+                        help="ADB port (default: 21503)")
+    parser.add_argument("--trophy-filter", type=int, default=600,
+                        help="Trophy filter target (400-4000, default: 600)")
+    parser.add_argument("--gold", type=int, default=1_000_000,
+                        help="Melt threshold — melt if gold above this, sell otherwise (100000-32000000, default: 1000000)")
+    parser.add_argument("--drop-trophies", choices=["drop_yes", "drop_no"], default="drop_no",
+                        help="Drop trophies mode: drop_yes ends match after 3s, drop_no after 180s (default: drop_no)")
+    args = parser.parse_args()
 
-    for arg in args:
-        if arg == 'g':
-            melt_threshold = 24_000_000
-        elif arg.isdigit():
-            val = int(arg)
-            if 600 <= val <= 3500:
-                trophy_filter = val
-            elif 1_000_000 <= val <= 30_000_000:
-                melt_threshold = val
-            else:
-                port = val
+    # Validate ranges
+    if not (400 <= args.trophy_filter <= 4000):
+        parser.error(f"--trophy-filter must be between 400 and 4000, got {args.trophy_filter}")
+    if not (100_000 <= args.gold <= 32_000_000):
+        parser.error(f"--gold must be between 100000 and 32000000, got {args.gold}")
+
+    trophy_filter  = args.trophy_filter
+    melt_threshold = args.gold
+    drop_trophies  = args.drop_trophies == "drop_yes"
+    port           = args.port
 
     base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     template_dir = os.path.join(base, "En_Templates")
 
-    print(f"Trophy filter: {trophy_filter} | Melt threshold: {melt_threshold:,}")
-    bot = RR2Bot(port=port, template_dir=template_dir, trophy_filter=trophy_filter, melt_threshold=melt_threshold)
+    print(f"Port: {port} | Trophy filter: {trophy_filter} | Melt threshold: {melt_threshold:,} | Drop trophies: {'YES' if drop_trophies else 'NO'}")
+    bot = RR2Bot(port=port, template_dir=template_dir, trophy_filter=trophy_filter,
+                 melt_threshold=melt_threshold, drop_trophies=drop_trophies)
     bot.loop()

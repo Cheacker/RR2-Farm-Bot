@@ -4,7 +4,7 @@
 
 MEmu emülatöründe çalışan Royal Revolt 2 için ADB tabanlı farm botu.
 Bağlantı: `adbutils` → `127.0.0.1:21503`. Görüntü: OpenCV `TM_CCOEFF_NORMED`.
-Çalıştırma: `cd rr2-farm-bot-public/src && python bot.py [port] [trophy_filter]`
+Çalıştırma: `cd rr2-farm-bot-public/src && python bot.py [--port PORT] [--trophy-filter N] [--gold N] [--drop-trophies drop_yes|drop_no]`
 
 ---
 
@@ -141,7 +141,7 @@ Kontrol sırası (önemli):
 ### `handle_in_game`
 - Her 0.65s'de `IN_GAME_TAP_COORDS` tap
 - Ekran mevcutsa her 4s'de `btn_continue` kontrol
-- 3 dakika timeout → oyunu yeniden başlat
+- 3 dakika timeout (drop_no) veya 3 saniye timeout (drop_yes) → oyunu yeniden başlat
 - Ekran `None` olsa bile (ADB geçici hata) tap yapmaya devam eder
 
 ### `handle_chamber_of_fortune`
@@ -270,7 +270,18 @@ else:
 ## Çalıştırma Örnekleri
 
 ```bash
-python bot.py              # varsayılan port 21503, trophy filter 600
-python bot.py 700          # trophy filter 700
-python bot.py 21503 800    # explicit port + trophy filter 800
+python bot.py                                                    # varsayılan: port 21503, trophy 600, gold 1M, drop_no
+python bot.py --trophy-filter 700                                # trophy filter 700
+python bot.py --gold 24000000                                    # melt threshold 24M
+python bot.py --drop-trophies drop_yes                           # drop mode (3s timeout)
+python bot.py --port 21503 --trophy-filter 800 --gold 5000000    # tüm parametreler
 ```
+
+### Parametreler
+
+| Parametre | Varsayılan | Aralık | Açıklama |
+|---|---|---|---|
+| `--port` | `21503` | — | ADB bağlantı portu |
+| `--trophy-filter` | `600` | 400–4000 | Kupa filtresi hedef değeri |
+| `--gold` | `1000000` | 100000–32000000 | Melt threshold: altın bunun üstündeyse erit, altındaysa sat |
+| `--drop-trophies` | `drop_no` | `drop_yes` / `drop_no` | `drop_yes`: maçı 3sn sonra bırak (kupa düşürme). `drop_no`: normal 180sn timeout |
