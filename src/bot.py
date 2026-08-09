@@ -28,8 +28,12 @@ IN_GAME_TAP_COORDS = (10, 10) # (1130, 274) for real tap on map
 GEAR_SET_1_COORDS  = (226, 818)
 GEAR_SET_2_COORDS  = (298, 820)
 GEAR_SET_3_COORDS  = (366, 818)
-VIDEO_CLOSE_COORDS = (1522, 94)    
-SHOP_COORDS        = (1540, 508)    
+VIDEO_CLOSE_COORDS = (1522, 94)
+SHOP_COORDS        = (1540, 508)
+GREEN_BACK_COORDS  = (1430, 85)    # back out of attack prep / loading screen
+SCROLL_CONFIRM_COORDS = (812, 832) # ranked-list confirm after scroll — on the
+                                   # attack-prep screen this is "New Opponent",
+                                   # so never tap it without confirming the screen
 
 
 class State:
@@ -67,6 +71,10 @@ class RR2Bot:
             exit(1)
         self.adb.ensure_resolution(1600, 900)
         self.vision = VisionInterpreter(template_dir=template_dir)
+        if "btn_attack_start_gray" not in self.vision.templates:
+            print("[WARN] btn_attack_start_gray.png missing — unattackable opponents "
+                  "will only be caught by the 12s timeout. Capture it with: "
+                  "python recrop.py → option 25")
         self.state  = State.HOME
         self.running = True
 
@@ -245,12 +253,47 @@ class RR2Bot:
                         print("[HOME] No collect found, trying btn_close...")
                         self.adb.tap(close[0], close[1])
 
+    # ── Helper: is the attack-prep screen showing? ────────────────────────────
+    def _on_attack_prep_screen(self, screen):
+        """True if either the yellow or gray attack button is visible."""
+        if screen is None:
+            return False
+        return bool(
+            self.vision.find_template(screen, "btn_attack_start", threshold=0.85)
+            or self.vision.find_template(screen, "btn_attack_start_gray", threshold=0.85)
+        )
+
+    # ── Helper: leave attack prep ─────────────────────────────────────────────
+    def _leave_attack_prep(self, reason):
+        """Navigate back to the ranked list. Never just flip state — if we stay on
+        the attack-prep screen, FILTERED_RANKS blind-taps 'New Opponent'."""
+        if self._current_target:
+            self.db.mark_active(self._current_target)
+            print(f"[ATTACK_PREP] {reason} — '{self._current_target}' marked unattackable")
+        else:
+            print(f"[ATTACK_PREP] {reason} — backing out")
+        self.adb.tap(*GREEN_BACK_COORDS)
+        self._current_target = None
+        self._skip_top += 1
+        self.state = State.FILTERED_RANKS
+        time.sleep(0.6)
+
     # ── Helper: scroll ranked list ────────────────────────────────────────────
     def _scroll_list(self, times=1):
         for _ in range(times):
             self.adb.swipe(650, 600, 650, 300, 300)
             time.sleep(0.4)
-        self.adb.tap(812, 832)
+        # Guard the blind confirm tap — if we are actually on the attack-prep
+        # screen this coordinate is "New Opponent" (unfiltered reroll, costs trophies).
+        f = self.adb.current_screen()
+        if self._on_attack_prep_screen(f):
+            print("[SCROLL] Attack-prep screen detected — skipping confirm tap, backing out")
+            self.adb.tap(*GREEN_BACK_COORDS)
+            time.sleep(0.6)
+            self.state = State.FILTERED_RANKS
+            self._skip_top = 0
+            return
+        self.adb.tap(*SCROLL_CONFIRM_COORDS)
         time.sleep(5)
         print(f"List scrolled {times} time(s).")
         self._skip_top = 0
@@ -304,9 +347,10 @@ class RR2Bot:
                 self.state = State.HOME
                 return
             if self._no_opponent_count % 9 == 0:
-                attack_btn = self.vision.find_template(screen, "btn_attack_start", threshold=0.5)
-                if attack_btn:
-                    print("[FILTERED_RANKS] Attack button visible → ATTACK_PREP")
+                # 0.85, not 0.5 — a 0.5 threshold matches almost anything and
+                # used to drag the bot into ATTACK_PREP on unrelated screens.
+                if self._on_attack_prep_screen(screen):
+                    print("[FILTERED_RANKS] Attack-prep screen detected → ATTACK_PREP")
                     self.state = State.ATTACK_PREP
                     self._attack_prep_start = time.time()
                     return
@@ -349,6 +393,12 @@ class RR2Bot:
 
     # ── ATTACK_PREP ───────────────────────────────────────────────────────────
     def handle_attack_prep(self, screen):
+        # Unattackable opponent: the attack button renders gray instead of yellow.
+        # Check this FIRST so we back out in one loop instead of waiting out 12s.
+        if self.vision.find_template(screen, "btn_attack_start_gray", threshold=0.90):
+            self._leave_attack_prep("Attack button is gray (unattackable)")
+            return
+
         pos = self.vision.find_template(screen, "btn_attack_start", threshold=0.9)
         if pos:
             print("[ATTACK_PREP] Attack button found, pressing → GAME_LOAD...")
@@ -358,8 +408,7 @@ class RR2Bot:
             self.state = State.GAME_LOAD
             time.sleep(0.2)
         elif time.time() - self._attack_prep_start > 12:
-            print("[ATTACK_PREP] Button not found within 12s → FILTERED_RANKS")
-            self.state = State.FILTERED_RANKS
+            self._leave_attack_prep("Button not found within 12s")
         else:
             print("[ATTACK_PREP] Waiting for attack button...")
 
@@ -426,7 +475,7 @@ class RR2Bot:
     # ── GOING_BACK ────────────────────────────────────────────────────────────
     def handle_going_back(self, screen):
         print("[GOING_BACK] Tapping green back button → FILTERED_RANKS...")
-        self.adb.tap(1430, 85)
+        self.adb.tap(*GREEN_BACK_COORDS)
         self._skip_top = 0
         self.state = State.FILTERED_RANKS
         time.sleep(0.5)

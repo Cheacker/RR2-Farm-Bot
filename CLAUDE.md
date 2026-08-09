@@ -53,7 +53,7 @@ HOME → TROPHY_MENU → FILTERED_RANKS → ATTACK_PREP → GAME_LOAD → IN_GAM
 
 | Sabit | Değer | Açıklama |
 |---|---|---|
-| `TROPHY_COORDS` | `(1545, 128)` | Ana ekran kupa/dövüş ikonu |
+| `TROPHY_COORDS` | `(1546, 114)` | Ana ekran kupa/dövüş ikonu |
 | `COLLECT_ALL_RESOURCES` | `(60, 506)` | Ana ekran tüm kaynakları topla butonu |
 | `BLUE_SEARCH_COORDS` | `(1436, 213)` | Kupa menüsü mavi arama butonu |
 | `ARCHER_COORDS` | `(200, 800)` | Oyun başlangıcı okçu seçim butonu |
@@ -62,10 +62,12 @@ HOME → TROPHY_MENU → FILTERED_RANKS → ATTACK_PREP → GAME_LOAD → IN_GAM
 | `MINUS_RIGHT_COORDS` | `(1084, 226)` | Kupa filtresi sağ eksi |
 | `PLUS_LEFT_COORDS` | `(985, 229)` | Kupa filtresi sol artı (şu an kullanılmıyor) |
 | `PLUS_RIGHT_COORDS` | `(1258, 226)` | Kupa filtresi sağ artı |
-| `IN_GAME_TAP_COORDS` | `(954, 302)` | Oyun içi her 0.65s'de tıklanan nokta |
-| `GEAR_SET_3_COORDS` | `(366, 818)` | Saldırı hazırlık ekranı dişli seti 3 |
+| `IN_GAME_TAP_COORDS` | `(10, 10)` | Oyun içi her 0.65s'de tıklanan nokta. **Şu an köşeye basıyor** — haritaya gerçek tap için `(1130, 274)` (kodda yorum olarak duruyor) |
+| `GEAR_SET_1/2/3_COORDS` | `(226,818)` / `(298,820)` / `(366,818)` | Saldırı hazırlık ekranı dişli setleri (sadece 3 kullanılıyor) |
 | `VIDEO_CLOSE_COORDS` | `(1522, 94)` | Video teklifi ve shop çarpı butonu |
 | `SHOP_COORDS` | `(1540, 508)` | Ana ekrandaki dükkan butonu |
+| `GREEN_BACK_COORDS` | `(1430, 85)` | Yeşil geri butonu (attack prep / load ekranından çıkış) |
+| `SCROLL_CONFIRM_COORDS` | `(812, 832)` | Scroll sonrası liste onay tap'i. **DİKKAT:** attack-prep ekranında bu koordinat "New Opponent" butonu — ekran teyit edilmeden asla basılmamalı |
 
 ---
 
@@ -76,7 +78,10 @@ HOME → TROPHY_MENU → FILTERED_RANKS → ATTACK_PREP → GAME_LOAD → IN_GAM
 | `icon_forge.png` | 0.90 | Ana ekranda görünen dövüşhane ikonu (HOME tespiti için) |
 | `btn_start_search.png` | 0.95 | Sarı arama butonu (rakip bulununca çıkar) |
 | `area_top_opponent.png` | 0.92 | Kılıç/saldırı ikonu (ranked listede, multi-match) |
-| `btn_attack_start.png` | 0.90 | Saldır butonu (maç hazırlık ekranı) |
+| `btn_attack_start.png` | 0.90 | Saldır butonu (maç hazırlık ekranı, sarı) |
+| `btn_attack_start_gray.png` | 0.90 | **Gri** saldır butonu — saldırılamaz rakip. Yoksa bot 12s timeout'a düşer (başlangıçta uyarı basar) |
+| `btn_collect_league.png` | 0.80 | Lig ödülü topla butonu (HOME, her 10 miss'te) |
+| `btn_search_menu.png` | — | Arama menüsü (şu an kodda kullanılmıyor) |
 | `btn_bring_me_back.png` | 0.90 | Aktif oyuncu uyarısı — geri dön butonu |
 | `btn_archer.png` | 0.90 | Maç başladı, okçu seçim butonu |
 | `btn_continue.png` | 0.95 | Maç sonu devam butonu (COF girişi) |
@@ -122,11 +127,22 @@ HOME → TROPHY_MENU → FILTERED_RANKS → ATTACK_PREP → GAME_LOAD → IN_GAM
   - `_skip_top >= 4` ise liste scroll et (`_scroll_count` kadar)
 - 27 bulunamazsa: oyunu yeniden başlat
 - Her 3 bulunamazsa: scroll
-- Her 9'da: `btn_attack_start` (threshold 0.5) varsa ATTACK_PREP
+- Her 9'da: `_on_attack_prep_screen()` (threshold 0.85) true ise ATTACK_PREP
+
+**`_on_attack_prep_screen(screen)`:** `btn_attack_start` **veya** `btn_attack_start_gray` 0.85'te görünüyorsa True.
+Eskiden burada threshold 0.5 kullanılıyordu — neredeyse her şeye eşleşip botu alakasız ekranlarda ATTACK_PREP'e sürüklüyordu.
+
+**`_scroll_list(times)`:** swipe'lardan sonra `SCROLL_CONFIRM_COORDS`'a basmadan **önce** taze ekran alıp `_on_attack_prep_screen()` kontrol eder.
+Attack-prep ekranındaysa: onay tap'i atlanır, `GREEN_BACK_COORDS`'a basılıp FILTERED_RANKS'e dönülür.
 
 ### `handle_attack_prep`
-- `btn_attack_start` bulunca: önce `GEAR_SET_3_COORDS` tap (dişli seti seç), sonra saldır
-- 12s içinde bulunamazsa: FILTERED_RANKS'e dön
+Kontrol sırası (önemli):
+1. **`btn_attack_start_gray`** — saldırılamaz rakip: `_leave_attack_prep()` ile geri çık (1 döngüde, 12s beklemeden)
+2. **`btn_attack_start`** (sarı) — önce `GEAR_SET_3_COORDS` tap (dişli seti seç), sonra saldır → GAME_LOAD
+3. 12s içinde hiçbiri bulunamazsa: `_leave_attack_prep()`
+
+**`_leave_attack_prep(reason)`:** oyuncuyu `db.mark_active()` ile işaretler, `GREEN_BACK_COORDS`'a basar, `_skip_top` artırır, FILTERED_RANKS'e döner.
+State'i sessizce değiştirmek **yasak** — ekranda hâlâ attack-prep varken FILTERED_RANKS `SCROLL_CONFIRM_COORDS`'a basıp "New Opponent" tetikliyordu (filtresiz rakip → kupa kaybı).
 
 ### `handle_game_load`
 Kontrol sırası (önemli):
@@ -180,6 +196,19 @@ else:
 | `_reconnect()` | Aggressive — kill-server + start-server |
 | `current_screen(retries=4)` | 4 deneme, başarısızsa `_reconnect()` çağırır |
 | `quick_screen_check()` | Tek deneme, reconnect yok — MEmu başlatma polling için |
+| `ensure_resolution(w, h)` | `wm size` ile emülatör çözünürlüğünü **1600x900**'e sabitler |
+
+### Çözünürlük (ÖNEMLİ)
+
+Tüm template'ler ve **tüm sabit koordinatlar** 1600x900 ekran görüntüsünden alındı.
+`cv2.matchTemplate` (TM_CCOEFF_NORMED) **ölçek-bağımsız değildir** — farklı çözünürlükte
+buton piksel boyutu değişir, eşleşme skoru düşer veya tamamen kaybolur. Koordinatlar da kayar.
+
+Çözüm: scale-invariant vision yerine **çözünürlüğü sabitlemek**. `ensure_resolution(1600, 900)` çağrılır:
+- `__init__`'te ADB cihaz teyit edildikten hemen sonra (hem soğuk açılış hem çalışan MEmu)
+- `_restart_memu()`'da MEmu geri geldikten sonra
+
+`wm size` emülatör tarafından engellenirse yedek plan: MEmu'nun kendi VM ayarını 1600x900 yapmak.
 
 `screencap -p` shell komutuna `timeout=15` eklendi — ADB soket donmasında 2 dakikalık sessizliği önler.
 
@@ -213,7 +242,8 @@ else:
 
 - `player_data.json` dosyasına yazar
 - `mark_active(name)` → son saldırı zamanını kaydeder
-- `is_active(name)` → son 3 saatte saldırıldıysa True döner (3x kılıç limiti)
+- `is_active(name)` → son **15 dakikada** (`ACTIVE_DURATION = 900`) işaretlendiyse True döner
+- `__meta__` anahtarı `last_memu_restart` zaman damgasını tutar
 - `info_str(name)` → log için "active: True (HH:MM:SS)" veya "active: False (never)"
 
 ---
@@ -234,25 +264,26 @@ else:
 
 | No | Açıklama | Template |
 |---|---|---|
-| 1 | Kupa ikonu | `icon_trophy` |
+| 1 | Kupa ikonu (ana ekran) | `icon_trophy` |
 | 2 | Sarı ara butonu | `btn_start_search` |
-| 3 | Kılıç/saldırı butonu | `area_top_opponent` |
-| 4 | Saldırı başlat butonu | `btn_attack_start` |
-| 5 | Atla butonu | `btn_skip` |
-| 6 | Devam et butonu | `btn_continue` |
-| 7 | Sat butonu | `btn_sell` |
-| 8 | Pes et butonu | `btn_give_up` |
-| 9 | Devam etmek için dokun | `text_tap_to_continue` |
-| 10 | Sandıklar (6 ayrı) | `chest_1..6` |
-| 11 | Mac yükleme ekranı | `screen_loading` |
-| 12 | Beni geri götür butonu | `btn_go_back` |
-| 13 | Yeşil geri butonu | `btn_green_back` |
+| 3 | Kılıç/saldırı ikonu (ranked liste) | `area_top_opponent` |
+| 4 | Saldırı başlat butonu (sarı) | `btn_attack_start` |
+| 5 | Devam et butonu | `btn_continue` |
+| 6 | Sat butonu | `btn_sell` |
+| 7 | Pes et butonu | `btn_give_up` |
+| 8-13 | Sandıklar (6 ayrı kırpma) | `chest_1..6` |
 | 14 | Archer butonu | `btn_archer` |
-| 15 | Gri kılıç (saldırı limiti) | `area_top_opponent_gray` |
-| 16 | Topla butonu | `btn_collect` |
-| 17 | Çarpı/kapat butonu | `btn_close` |
+| 15 | Beni geri götür butonu | `btn_bring_me_back` |
+| 16 | Yeşil geri butonu | `btn_green_back` |
+| 17 | Topla butonu | `btn_collect` |
+| 18 | Büyük topla butonu | `btn_big_collect` |
+| 19 | Çarpı/kapat butonu | `btn_close` |
+| 20 | Dövüşhane ikonu (ana ekran) | `icon_forge` |
+| 21 | Erit butonu (COF) | `btn_melt` |
 | 22 | Video teklif butonu | `btn_video` |
 | 23 | Ekmek satın al butonu | `btn_food` |
+| 24 | Lig ödülü topla butonu | `btn_collect_league` |
+| 25 | **GRİ** saldırı butonu (saldırılamaz rakip) | `btn_attack_start_gray` |
 
 ---
 
@@ -264,6 +295,10 @@ else:
 - **Gri kılıç ortada yanlış scroll:** Yalnızca listede SON rakibin ismi okunamazsa scroll — ortadaki gri kılıçlar false scroll tetiklemez
 - **Timeout=15 screencap'te:** `device.shell("screencap -p", timeout=15)` — ADB soket donmasında sonsuz beklemeyi önler
 - **`gold_ref` fallback zinciri:** `_gold_last` → `_gold_start` → None (None ise erit) — ilk maçta OCR henüz çalışmadan doğru karar
+- **Çözünürlük sabitlenir, vision ölçeklenmez:** `wm size 1600x900` — multi-scale template matching yerine ucuz ve kesin çözüm
+- **State değiştirmeden önce ekrandan çık:** Bir handler state'i sessizce değiştirip ekranda kalırsa, sonraki state'in sabit koordinat tap'leri yanlış ekrana basar. Attack-prep'ten çıkış her zaman `GREEN_BACK_COORDS` ile yapılır (`_leave_attack_prep`)
+- **Sabit koordinat tap'leri ekran teyidi ister:** `SCROLL_CONFIRM_COORDS` (812,832) attack-prep ekranında "New Opponent" — `_scroll_list` basmadan önce `_on_attack_prep_screen()` kontrol eder
+- **Düşük threshold yasak:** `btn_attack_start` için 0.5 kullanılıyordu, neredeyse her şeye eşleşiyordu → 0.85
 
 ---
 

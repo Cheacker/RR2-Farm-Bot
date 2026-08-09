@@ -31,7 +31,8 @@ SESSIONS = {
     "21": ("Melt Button (COF)",                                         ["btn_melt"]),
     "22": ("Video Button(After After Clicking attack, insufficient breads)", ["btn_video"]),
     "23": ("Shop food icon",                                         ["btn_food"]),
-    "24": ("League collect button (home screen)",                    ["btn_collect_league"])
+    "24": ("League collect button (home screen)",                    ["btn_collect_league"]),
+    "25": ("GRAY attack button (unattackable opponent, pre-match screen)", ["btn_attack_start_gray"])
 
 }
 
