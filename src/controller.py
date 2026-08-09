@@ -40,6 +40,24 @@ class ADBController:
             print(f"Connection failed: {e}")
             self.device = None
 
+    def ensure_resolution(self, width=1600, height=900):
+        """Force the emulator's rendered resolution — templates/coords are all captured at 1600x900."""
+        if not self.device:
+            return
+        target = f"{width}x{height}"
+        try:
+            out = self.device.shell("wm size").strip()
+            if target in out:
+                print(f"[ADB] Resolution OK ({out})")
+                return
+            print(f"[ADB] Resolution mismatch ({out}) — forcing {target}...")
+            self.device.shell(f"wm size {target}")
+            time.sleep(1)
+            out2 = self.device.shell("wm size").strip()
+            print(f"[ADB] Resolution now: {out2}")
+        except Exception as e:
+            print(f"[ADB] Failed to set resolution: {e}")
+
     def _reconnect(self):
         print("[ADB] Connection lost — kill-server/start-server...")
         try:

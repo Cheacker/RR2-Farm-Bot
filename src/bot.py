@@ -24,7 +24,7 @@ MINUS_LEFT_COORDS  = (810, 226)
 MINUS_RIGHT_COORDS = (1084, 226)
 PLUS_LEFT_COORDS   = (985, 229)
 PLUS_RIGHT_COORDS  = (1258, 226)
-IN_GAME_TAP_COORDS = (1130, 274)
+IN_GAME_TAP_COORDS = (10, 10) # (1130, 274) for real tap on map
 GEAR_SET_1_COORDS  = (226, 818)
 GEAR_SET_2_COORDS  = (298, 820)
 GEAR_SET_3_COORDS  = (366, 818)
@@ -65,6 +65,7 @@ class RR2Bot:
         if not self.adb.device:
             print("ADB connection failed.")
             exit(1)
+        self.adb.ensure_resolution(1600, 900)
         self.vision = VisionInterpreter(template_dir=template_dir)
         self.state  = State.HOME
         self.running = True
@@ -109,6 +110,7 @@ class RR2Bot:
             self.adb._connect()
             if self.adb.device:
                 print("[MEMU] MEmu is ready.")
+                self.adb.ensure_resolution(1600, 900)
                 break
             time.sleep(5)
         else:
