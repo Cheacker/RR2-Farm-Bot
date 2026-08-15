@@ -1,5 +1,6 @@
 import time
 import os
+import glob
 import argparse
 import subprocess
 import cv2
@@ -11,8 +12,27 @@ FAIL_DEBUG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__
 os.makedirs(FAIL_DEBUG_DIR, exist_ok=True)
 
 RR2_PACKAGE            = "com.flaregames.rrtournament"
-MEMU_EXE               = r"D:\Program Files\Microvirt\MEmu\MEmu.exe"
-MEMU_RESTART_INTERVAL  = 3 * 3600  # restart MEmu every 3 hours
+EMULATOR_RESTART_INTERVAL = 3 * 3600  # restart the emulator every 3 hours
+
+# ldconsole.exe lives inside the versioned LDPlayer install folder (LDPlayer9,
+# LDPlayer14, ...) which differs per machine/drive — glob instead of hardcoding.
+_LDCONSOLE_GLOBS = [
+    r"C:\LDPlayer\LDPlayer*\ldconsole.exe",
+    r"D:\LDPlayer\LDPlayer*\ldconsole.exe",
+    r"C:\Program Files\LDPlayer\LDPlayer*\ldconsole.exe",
+    r"D:\Program Files\LDPlayer\LDPlayer*\ldconsole.exe",
+    r"C:\Program Files (x86)\LDPlayer\LDPlayer*\ldconsole.exe",
+]
+
+
+def find_ldconsole():
+    """Best-effort auto-detect of ldconsole.exe. Returns None if not found —
+    callers must fall back to requiring --ldconsole explicitly."""
+    for pattern in _LDCONSOLE_GLOBS:
+        matches = glob.glob(pattern)
+        if matches:
+            return matches[0]
+    return None
 
 # ── Coordinates ──────────────────────────────────────────────────────────────
 TROPHY_COORDS       = (1546, 114)     # set with get_coords.py
@@ -48,16 +68,23 @@ class State:
 
 
 class RR2Bot:
-    def __init__(self, port=21503, template_dir=None, trophy_filter=600, melt_threshold=1_000_000, drop_trophies=False):
+    def __init__(self, port=21503, template_dir=None, trophy_filter=600, melt_threshold=1_000_000,
+                 drop_trophies=False, ld_index=0, ldconsole=None):
         self.adb = ADBController(port=port)
-        self._memu_just_launched = False
+        self._ld_index = ld_index
+        self._ldconsole = ldconsole or find_ldconsole()
+        self._emulator_just_launched = False
         if not self.adb.device:
-            print("[MEMU] No ADB device — killing any existing MEmu and launching fresh...")
-            subprocess.run(["taskkill", "/F", "/IM", "MEmu.exe", "/T"], capture_output=True)
+            if not self._ldconsole:
+                print("[EMULATOR] No ADB device, and ldconsole.exe could not be auto-detected — "
+                      "start the LDPlayer instance manually, or pass its path with --ldconsole.")
+                exit(1)
+            print("[EMULATOR] No ADB device — closing any existing instance and launching fresh...")
+            subprocess.run([self._ldconsole, "quit", "--index", str(self._ld_index)], capture_output=True)
             time.sleep(3)
-            subprocess.Popen([MEMU_EXE])
-            self._memu_just_launched = True
-            print("[MEMU] Waiting for MEmu to boot...")
+            subprocess.Popen([self._ldconsole, "launch", "--index", str(self._ld_index)])
+            self._emulator_just_launched = True
+            print("[EMULATOR] Waiting for the instance to boot...")
             time.sleep(20)
             self.adb._reconnect()
             deadline = time.time() + 90
@@ -103,30 +130,36 @@ class RR2Bot:
         self.db = PlayerDB()
 
 
-    # ── MEmu restart ─────────────────────────────────────────────────────────
-    def _restart_memu(self):
-        print("[MEMU] Force-closing MEmu...")
-        subprocess.run(["taskkill", "/F", "/IM", "MEmu.exe", "/T"], capture_output=True)
+    # ── Emulator restart ──────────────────────────────────────────────────────
+    def _restart_emulator(self):
+        if not self._ldconsole:
+            print("[EMULATOR] ldconsole.exe unknown — cannot restart the instance, "
+                  "skipping (pass --ldconsole to enable this). Restarting the game only.")
+            self.adb.restart_game(RR2_PACKAGE)
+            self.state = State.HOME
+            return
+        print(f"[EMULATOR] Closing instance --index {self._ld_index}...")
+        subprocess.run([self._ldconsole, "quit", "--index", str(self._ld_index)], capture_output=True)
         time.sleep(5)
-        print(f"[MEMU] Launching: {MEMU_EXE}")
-        subprocess.Popen([MEMU_EXE])
-        self.db.set_last_memu_restart()
-        print("[MEMU] Waiting for MEmu ADB to be ready...")
+        print(f"[EMULATOR] Launching instance --index {self._ld_index}...")
+        subprocess.Popen([self._ldconsole, "launch", "--index", str(self._ld_index)])
+        self.db.set_last_emulator_restart()
+        print("[EMULATOR] Waiting for ADB to be ready...")
         time.sleep(20)
         deadline = time.time() + 75
         while time.time() < deadline:
             self.adb._connect()
             if self.adb.device:
-                print("[MEMU] MEmu is ready.")
+                print("[EMULATOR] Instance is ready.")
                 self.adb.ensure_resolution(1600, 900)
                 break
             time.sleep(5)
         else:
-            print("[MEMU] Timeout — MEmu did not start within 90s.")
-        self.db.set_last_memu_restart()
+            print("[EMULATOR] Timeout — instance did not start within 90s.")
+        self.db.set_last_emulator_restart()
         self.adb.restart_game(RR2_PACKAGE)
         self.state = State.HOME
-        print("[MEMU] Restart complete.")
+        print("[EMULATOR] Restart complete.")
 
     # ── Shutdown helper ───────────────────────────────────────────────────────
     def _shutdown(self, reason: str):
@@ -142,16 +175,16 @@ class RR2Bot:
     # ── Main loop ─────────────────────────────────────────────────────────────
     def loop(self):
         print("Bot started! Press Ctrl+C to stop.")
-        last_restart = self.db.get_last_memu_restart()
-        if self._memu_just_launched:
-            # MEmu was just launched in __init__ — treat as fresh restart, don't close again
-            self.db.set_last_memu_restart()
+        last_restart = self.db.get_last_emulator_restart()
+        if self._emulator_just_launched:
+            # Instance was just launched in __init__ — treat as fresh restart, don't close again
+            self.db.set_last_emulator_restart()
             self.adb.restart_game(RR2_PACKAGE)
         elif last_restart is None:
-            self.db.set_last_memu_restart()
+            self.db.set_last_emulator_restart()
             self.adb.restart_game(RR2_PACKAGE)
-        elif time.time() - last_restart >= MEMU_RESTART_INTERVAL:
-            self._restart_memu()
+        elif time.time() - last_restart >= EMULATOR_RESTART_INTERVAL:
+            self._restart_emulator()
         else:
             self.adb.restart_game(RR2_PACKAGE)
         while self.running:
@@ -162,9 +195,9 @@ class RR2Bot:
                     continue
 
                 if self.state == State.HOME:
-                    last_restart = self.db.get_last_memu_restart() or self._start_time
-                    if time.time() - last_restart >= MEMU_RESTART_INTERVAL:
-                        self._restart_memu()
+                    last_restart = self.db.get_last_emulator_restart() or self._start_time
+                    if time.time() - last_restart >= EMULATOR_RESTART_INTERVAL:
+                        self._restart_emulator()
                         continue
 
                 if   self.state == State.HOME:               self.handle_home(screen)
@@ -627,8 +660,14 @@ class RR2Bot:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Royal Revolt 2 Farm Bot")
-    parser.add_argument("--port", type=int, default=21503,
-                        help="ADB port (default: 21503)")
+    parser.add_argument("--port", type=int, default=5555,
+                        help="ADB port of the LDPlayer instance (default: 5555, the first instance). "
+                             "Run 'adb devices' while the instance is running to confirm it.")
+    parser.add_argument("--ld-index", type=int, default=0,
+                        help="LDPlayer instance index, used for auto-restart via ldconsole (default: 0, the first instance)")
+    parser.add_argument("--ldconsole", type=str, default=None,
+                        help="Path to ldconsole.exe. Auto-detected under common LDPlayer install "
+                             "locations if omitted; only needed if auto-detect fails.")
     parser.add_argument("--trophy-filter", type=int, default=600,
                         help="Trophy filter target (400-4000, default: 600)")
     parser.add_argument("--gold", type=int, default=1_000_000,
@@ -638,8 +677,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Validate ranges
-    if not (20000 <= args.port <= 22000):
-        parser.error(f"--port must be between 20000 and 22000, got {args.port}")
+    # Any valid TCP port — different emulators use very different ADB port
+    # conventions (LDPlayer: 5555+2n per instance, MEmu: 21503+10n, etc.)
+    if not (1 <= args.port <= 65535):
+        parser.error(f"--port must be between 1 and 65535, got {args.port}")
     if not (400 <= args.trophy_filter <= 4000):
         parser.error(f"--trophy-filter must be between 400 and 4000, got {args.trophy_filter}")
     if not (100_000 <= args.gold <= 32_000_000):
@@ -653,7 +694,10 @@ if __name__ == "__main__":
     base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     template_dir = os.path.join(base, "En_Templates")
 
-    print(f"Port: {port} | Trophy filter: {trophy_filter} | Melt threshold: {melt_threshold:,} | Drop trophies: {'YES' if drop_trophies else 'NO'}")
+    ldconsole = args.ldconsole or find_ldconsole()
+    print(f"Port: {port} | LD index: {args.ld_index} | ldconsole: {ldconsole or 'not found — pass --ldconsole'} | "
+          f"Trophy filter: {trophy_filter} | Melt threshold: {melt_threshold:,} | Drop trophies: {'YES' if drop_trophies else 'NO'}")
     bot = RR2Bot(port=port, template_dir=template_dir, trophy_filter=trophy_filter,
-                 melt_threshold=melt_threshold, drop_trophies=drop_trophies)
+                 melt_threshold=melt_threshold, drop_trophies=drop_trophies,
+                 ld_index=args.ld_index, ldconsole=ldconsole)
     bot.loop()

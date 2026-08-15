@@ -41,13 +41,13 @@ class PlayerDB:
                  if p["active_since"] else "never")
         return f"active: {p['active']} ({since})"
 
-    def get_last_memu_restart(self):
-        return self._data.get(META_KEY, {}).get("last_memu_restart")
+    def get_last_emulator_restart(self):
+        return self._data.get(META_KEY, {}).get("last_emulator_restart")
 
-    def set_last_memu_restart(self):
+    def set_last_emulator_restart(self):
         if META_KEY not in self._data:
             self._data[META_KEY] = {}
-        self._data[META_KEY]["last_memu_restart"] = time.time()
+        self._data[META_KEY]["last_emulator_restart"] = time.time()
         self._save()
 
     def _save(self):

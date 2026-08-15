@@ -34,7 +34,20 @@ class ADBController:
                     print("No ADB devices found. Make sure the emulator is running.")
                     self.device = None
                 else:
-                    self.device = devices[0]
+                    # Multiple emulators can be registered with adb at once (e.g. MEmu
+                    # left running alongside LDPlayer) — devices[0] would silently pick
+                    # whichever adb happens to list first, not the one we asked to connect
+                    # to. Match the requested port's serial explicitly when possible.
+                    target_serial = f"127.0.0.1:{self._port}"
+                    match = next((d for d in devices if d.serial == target_serial), None)
+                    if match:
+                        self.device = match
+                    else:
+                        self.device = devices[0]
+                        if len(devices) > 1:
+                            print(f"[ADB] WARNING: {len(devices)} devices registered, none match "
+                                  f"{target_serial} — falling back to {self.device.serial}. "
+                                  f"Close unused emulators to avoid controlling the wrong one.")
                     print(f"Connected to device: {self.device.serial}")
         except Exception as e:
             print(f"Connection failed: {e}")
@@ -125,16 +138,33 @@ class ADBController:
             return
         self.device.shell(f"input keyevent {key}")
 
+    def _resolve_launch_component(self, package: str):
+        """Ask the device for '<package>/<launcher-activity>'. Not all emulator
+        Android images ship 'monkey' (LDPlayer's doesn't), so we can't rely on
+        it to launch by package name alone — resolve the real component instead."""
+        try:
+            out = self.device.shell(f"cmd package resolve-activity --brief {package}")
+            for line in out.strip().splitlines():
+                line = line.strip()
+                if line.startswith(f"{package}/"):
+                    return line
+        except Exception as e:
+            print(f"[ADB] resolve-activity failed: {e}")
+        return None
+
     def restart_game(self, package: str):
         if not self.device:
             return
         print(f"[ADB] Stopping game: {package}")
         self.device.shell(f"am force-stop {package}")
         time.sleep(2)
-        print(f"[ADB] Launching game: {package}")
-        self.device.shell(
-            f"monkey -p {package} -c android.intent.category.LAUNCHER 1"
-        )
+        component = self._resolve_launch_component(package)
+        if component:
+            print(f"[ADB] Launching game: {component}")
+            self.device.shell(f"am start -n {component}")
+        else:
+            print(f"[ADB] Could not resolve launcher activity, falling back to monkey: {package}")
+            self.device.shell(f"monkey -p {package} -c android.intent.category.LAUNCHER 1")
         time.sleep(5)
 
 
