@@ -117,6 +117,7 @@ class RR2Bot:
         self._current_target    = None
         self._attack_prep_start = 0
         self._trophy_miss_count = 0
+        self._trophy_menu_miss  = 0
         self._in_game_start     = 0
         self._trophy_filter     = trophy_filter
         self._melt_threshold    = melt_threshold
@@ -297,12 +298,21 @@ class RR2Bot:
         )
 
     # ── Helper: leave attack prep ─────────────────────────────────────────────
-    def _leave_attack_prep(self, reason):
+    def _leave_attack_prep(self, reason, permanent=False):
         """Navigate back to the ranked list. Never just flip state — if we stay on
-        the attack-prep screen, FILTERED_RANKS blind-taps 'New Opponent'."""
+        the attack-prep screen, FILTERED_RANKS blind-taps 'New Opponent'.
+
+        permanent=True is for a confirmed-gray attack button: the trophy gap makes this
+        opponent unattackable regardless of when we last saw them, so it's recorded
+        permanently instead of the 15-minute active-player mark (which is only a "they
+        might be online, try again later" guess, not "this matchup can never work")."""
         if self._current_target:
-            self.db.mark_active(self._current_target)
-            print(f"[ATTACK_PREP] {reason} — '{self._current_target}' marked unattackable")
+            if permanent:
+                self.db.mark_unattackable(self._current_target)
+                print(f"[ATTACK_PREP] {reason} — '{self._current_target}' marked permanently unattackable")
+            else:
+                self.db.mark_active(self._current_target)
+                print(f"[ATTACK_PREP] {reason} — '{self._current_target}' marked active")
         else:
             print(f"[ATTACK_PREP] {reason} — backing out")
         self.adb.tap(*GREEN_BACK_COORDS)
@@ -327,7 +337,16 @@ class RR2Bot:
             self._skip_top = 0
             return
         self.adb.tap(*SCROLL_CONFIRM_COORDS)
-        time.sleep(5)
+        # Poll instead of a fixed sleep — the list reload after the confirm tap
+        # doesn't take a constant amount of time (varies by machine/emulator), and a
+        # fixed sleep that's too short hands handle_filtered_ranks a still-loading
+        # screen, which reads as "no swords found" and looks like vision breaking.
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            time.sleep(0.3)
+            f = self.adb.current_screen()
+            if f is not None and self.vision.find_multiple_templates(f, "area_top_opponent", threshold=0.92):
+                break
         print(f"List scrolled {times} time(s).")
         self._skip_top = 0
 
@@ -335,6 +354,7 @@ class RR2Bot:
     def handle_trophy_menu(self, screen):
         yellow = self.vision.find_template(screen, "btn_start_search", threshold=0.95)
         if yellow:
+            self._trophy_menu_miss = 0
         
             val_left  = self.vision.read_region_number(screen, 850, 212, 948, 250)
             val_right = self.vision.read_region_number(screen, 1122, 209, 1218, 252)
@@ -366,6 +386,23 @@ class RR2Bot:
             return
         print(f"[TROPHY_MENU] Search button not found, tapping blue search coordinates: {BLUE_SEARCH_COORDS}")
         self.adb.tap(*BLUE_SEARCH_COORDS)
+        self._trophy_menu_miss += 1
+        # This used to spin forever with no recovery and no diagnostic trail if the
+        # search button never appeared — save one screenshot for later inspection, then
+        # eventually restart the game rather than getting stuck for the whole session.
+        if self._trophy_menu_miss == 50:
+            fresh = self.adb.current_screen()
+            if fresh is not None:
+                ts   = time.strftime('%Y%m%d_%H%M%S')
+                path = os.path.join(FAIL_DEBUG_DIR, f'{ts}_trophy_menu_stuck.png')
+                cv2.imwrite(path, fresh)
+                print(f"[TROPHY_MENU] Still stuck after {self._trophy_menu_miss} misses — saved {path}")
+        if self._trophy_menu_miss >= 300:
+            print(f"[TROPHY_MENU] Search button not found after {self._trophy_menu_miss} attempts — restarting game...")
+            self._trophy_menu_miss = 0
+            self.adb.restart_game(RR2_PACKAGE)
+            self.state = State.HOME
+            return
         time.sleep(0.15)
 
     # ── FILTERED_RANKS ────────────────────────────────────────────────────────
@@ -404,12 +441,14 @@ class RR2Bot:
                     return
                 print("[FILTERED_RANKS] Could not read player name → skipping")
                 continue
-            active = self.db.is_active(name)
+            active       = self.db.is_active(name)
+            unattackable = self.db.is_unattackable(name)
             info   = self.db.info_str(name)
             print(f"Player detected: [{name}], {info}")
-            if active:
+            if active or unattackable:
                 self._skip_top += 1
-                print(f"  → Active, skipping. skip={self._skip_top}")
+                reason = "Unattackable" if unattackable else "Active"
+                print(f"  → {reason}, skipping. skip={self._skip_top}")
                 if self._skip_top >= 4:
                     self._scroll_count += 1
                     print(f"[FILTERED_RANKS] skip={self._skip_top} >= 4, scrolling x{self._scroll_count}...")
@@ -429,7 +468,7 @@ class RR2Bot:
         # Unattackable opponent: the attack button renders gray instead of yellow.
         # Check this FIRST so we back out in one loop instead of waiting out 12s.
         if self.vision.find_template(screen, "btn_attack_start_gray", threshold=0.90):
-            self._leave_attack_prep("Attack button is gray (unattackable)")
+            self._leave_attack_prep("Attack button is gray (unattackable)", permanent=True)
             return
 
         pos = self.vision.find_template(screen, "btn_attack_start", threshold=0.9)
@@ -453,7 +492,7 @@ class RR2Bot:
         if video_btn:
             print("[GAME_LOAD] Video/food offer detected → buying food...")
             self.adb.tap(*VIDEO_CLOSE_COORDS)
-            time.sleep(0.5)
+            time.sleep(1)
             self.adb.tap(*SHOP_COORDS)
             time.sleep(7)
             f = self.adb.current_screen()
@@ -465,10 +504,27 @@ class RR2Bot:
                     time.sleep(1)
                 else:
                     print("[GAME_LOAD] Food button not found in shop.")
-            self.adb.tap(*VIDEO_CLOSE_COORDS)
-            time.sleep(0.5)
-            self.state = State.HOME
-            return
+            # Prefer a template-matched close over the fixed coordinate — VIDEO_CLOSE_COORDS
+            # is reused here on the assumption the shop's X sits in the same spot as the
+            # video popup's, which isn't guaranteed on every emulator/resolution.
+            f = self.adb.current_screen()
+            close_btn = self.vision.find_template(f, "btn_close", threshold=0.70) if f is not None else None
+            self.adb.tap(*close_btn) if close_btn else self.adb.tap(*VIDEO_CLOSE_COORDS)
+            time.sleep(1)
+            # Verify we actually left the shop/popup before declaring HOME — forcing the
+            # state blindly here is what left the bot stuck showing the shop on screen
+            # while HOME kept looking for icon_forge and never finding it.
+            f = self.adb.current_screen()
+            still_stuck = f is not None and (
+                self.vision.find_template(f, "btn_video", threshold=0.90)
+                or self.vision.find_template(f, "btn_food", threshold=0.90)
+            )
+            if not still_stuck:
+                self.state = State.HOME
+                return
+            print("[GAME_LOAD] Shop/video popup still visible after close attempt — retrying via miss counter.")
+            # Fall through to the miss counter below instead of returning — the existing
+            # 15-miss restart-game safety net will recover if this keeps failing.
         go_back = self.vision.find_template(screen, "btn_bring_me_back", threshold=0.9)
         if go_back:
             self._game_load_miss = 0

@@ -15,7 +15,7 @@ class PlayerDB:
 
     def _get(self, name):
         if name not in self._data:
-            self._data[name] = {"active": False, "active_since": None}
+            self._data[name] = {"active": False, "active_since": None, "unattackable": False}
         return self._data[name]
 
     def is_active(self, name):
@@ -35,11 +35,23 @@ class PlayerDB:
         p["active_since"] = time.time()
         self._save()
 
+    def is_unattackable(self, name):
+        p = self._data.get(name)
+        return bool(p and p.get("unattackable"))
+
+    def mark_unattackable(self, name):
+        """Permanent, unlike mark_active() — a gray attack button means the trophy gap
+        makes this opponent unattackable regardless of when we last saw them, so this
+        never expires the way the 15-minute active-player mark does."""
+        p = self._get(name)
+        p["unattackable"] = True
+        self._save()
+
     def info_str(self, name):
         p = self._get(name)
         since = (time.strftime("%H:%M:%S", time.localtime(p["active_since"]))
                  if p["active_since"] else "never")
-        return f"active: {p['active']} ({since})"
+        return f"active: {p['active']} ({since}), unattackable: {p.get('unattackable', False)}"
 
     def get_last_emulator_restart(self):
         return self._data.get(META_KEY, {}).get("last_emulator_restart")
@@ -67,6 +79,7 @@ class PlayerDB:
                 self._data[name] = {
                     "active":       entry.get("active", False),
                     "active_since": entry.get("active_since", None),
+                    "unattackable": entry.get("unattackable", False),
                 }
             player_count = sum(1 for k in self._data if k != META_KEY)
             print(f"[DB] {player_count} players loaded: {DB_PATH}")
