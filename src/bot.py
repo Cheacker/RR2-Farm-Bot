@@ -55,6 +55,17 @@ SCROLL_CONFIRM_COORDS = (812, 832) # ranked-list confirm after scroll — on the
                                    # attack-prep screen this is "New Opponent",
                                    # so never tap it without confirming the screen
 
+# ── Drop-trophies mode (only used when --drop-trophies drop_yes) ─────────────
+# All four are unset until captured — get_coords.py for the two tap coordinates
+# and the home-return coordinate, and get_coords.py again (or just eyeball the
+# region) for the OCR box around your own trophy count. Until all four are set,
+# drop mode falls back to the old behavior: a plain timeout + full game restart.
+OWN_TROPHY_REGION    = None  # (x1, y1, x2, y2) OCR region showing your own trophy count
+DROP_BUTTON_1_COORDS = None  # tapped first, 2s after the match starts
+DROP_BUTTON_2_COORDS = None  # tapped right after button 1
+DROP_HOME_COORDS     = None  # final tap that returns to HOME after dropping
+DROP_TROPHY_MARGIN   = 400   # dynamic filter target = own trophies - this
+
 
 class State:
     HOME               = "HOME"
@@ -85,7 +96,7 @@ class RR2Bot:
             subprocess.Popen([self._ldconsole, "launch", "--index", str(self._ld_index)])
             self._emulator_just_launched = True
             print("[EMULATOR] Waiting for the instance to boot...")
-            time.sleep(20)
+            time.sleep(15)
             self.adb._reconnect()
             deadline = time.time() + 90
             while time.time() < deadline:
@@ -102,6 +113,15 @@ class RR2Bot:
             print("[WARN] btn_attack_start_gray.png missing — unattackable opponents "
                   "will only be caught by the 12s timeout. Capture it with: "
                   "python recrop.py → option 25")
+        if drop_trophies and not (OWN_TROPHY_REGION and DROP_BUTTON_1_COORDS
+                                   and DROP_BUTTON_2_COORDS and DROP_HOME_COORDS):
+            print("[WARN] --drop-trophies is on but the drop-mode coordinates in bot.py "
+                  "aren't set — falling back to the old timeout+restart behavior. Fill in, "
+                  "at the top of bot.py: OWN_TROPHY_REGION (OCR box around your own trophy "
+                  "count, x1,y1,x2,y2 — use get_coords.py to find the corners), "
+                  "DROP_BUTTON_1_COORDS and DROP_BUTTON_2_COORDS (the two buttons tapped in "
+                  "order 2s after a match starts to end it), and DROP_HOME_COORDS (final tap "
+                  "back to HOME) — all via get_coords.py.")
         self.state  = State.HOME
         self.running = True
 
@@ -128,6 +148,8 @@ class RR2Bot:
         self._gold_last         = None
         self._pearl_last        = None
         self._game_load_miss    = 0
+        self._screen_none_count = 0
+        self._anchor_miss_streak = 0
         self.db = PlayerDB()
 
 
@@ -190,16 +212,27 @@ class RR2Bot:
             self.adb.restart_game(RR2_PACKAGE)
         while self.running:
             try:
-                screen = self.adb.current_screen()
-                if screen is None:
-                    time.sleep(0.1)
+                # Runs every iteration regardless of state — previously gated behind
+                # State.HOME, so a session stuck anywhere else (e.g. spinning in
+                # TROPHY_MENU) never reached this check and the safety-net restart
+                # that's supposed to catch a broken/hung emulator never fired.
+                last_restart = self.db.get_last_emulator_restart() or self._start_time
+                if time.time() - last_restart >= EMULATOR_RESTART_INTERVAL:
+                    self._restart_emulator()
                     continue
 
-                if self.state == State.HOME:
-                    last_restart = self.db.get_last_emulator_restart() or self._start_time
-                    if time.time() - last_restart >= EMULATOR_RESTART_INTERVAL:
+                screen = self.adb.current_screen()
+                if screen is None:
+                    self._screen_none_count += 1
+                    if self._screen_none_count >= 100:
+                        print(f"[LOOP] No screen for {self._screen_none_count} attempts — "
+                              f"emulator likely hung or disconnected, restarting it...")
+                        self._screen_none_count = 0
                         self._restart_emulator()
                         continue
+                    time.sleep(0.1)
+                    continue
+                self._screen_none_count = 0
 
                 if   self.state == State.HOME:               self.handle_home(screen)
                 elif self.state == State.TROPHY_MENU:        self.handle_trophy_menu(screen)
@@ -209,6 +242,24 @@ class RR2Bot:
                 elif self.state == State.GOING_BACK:         self.handle_going_back(screen)
                 elif self.state == State.IN_GAME:            self.handle_in_game(screen)
                 elif self.state == State.CHAMBER_OF_FORTUNE: self.handle_chamber_of_fortune(screen)
+
+                # A handler's primary anchor template missing 10 times in a row usually
+                # means we're not actually on the screen self.state assumes (stuck popup,
+                # a screen the templates weren't built for, etc). Rather than keep tapping
+                # blind coordinates for a screen that isn't there, scan every state's
+                # anchor to find out what's really on screen and resync to it.
+                if self._anchor_miss_streak >= 10:
+                    print(f"[RESYNC] {self._anchor_miss_streak} consecutive misses in "
+                          f"{self.state} — scanning all anchors for the real screen...")
+                    detected = self._find_state(screen)
+                    if detected and detected != self.state:
+                        print(f"[RESYNC] Screen actually shows {detected}, not {self.state} — resyncing.")
+                        self.state = detected
+                    elif detected == self.state:
+                        print(f"[RESYNC] Screen still matches {self.state} — false alarm, continuing.")
+                    else:
+                        print("[RESYNC] Screen doesn't match any known anchor.")
+                    self._anchor_miss_streak = 0
 
                 time.sleep(0.1)
 
@@ -225,6 +276,7 @@ class RR2Bot:
         pos = self.vision.find_template(screen, "icon_forge", 0.90)
         if pos:
             self._trophy_miss_count = 0
+            self._anchor_miss_streak = 0
             gold  = self.vision.read_region_number(screen, 102, 29, 253, 72)
             pearl = self.vision.read_region_number(screen, 88, 194, 213, 228)
             if gold is not None and pearl is not None:
@@ -243,6 +295,7 @@ class RR2Bot:
             time.sleep(0.5)
         else:
             self._trophy_miss_count += 1
+            self._anchor_miss_streak += 1
             if self._trophy_miss_count > 21:
                 print(f"[HOME] Forge not found after {self._trophy_miss_count} attempts — restarting game...")
                 self._trophy_miss_count = 0
@@ -250,17 +303,21 @@ class RR2Bot:
                 self.state = State.HOME
                 return
 
+            # Search for btn_close on every miss, not just every 6th — if the forge
+            # icon is missing because a popup/shop leftover is covering the screen
+            # (e.g. after the GAME_LOAD food-purchase flow didn't fully close out),
+            # waiting up to 6 misses to even try closing it just prolongs being stuck.
+            close = self.vision.find_template(screen, "btn_close", threshold=0.57)
+            if close:
+                print("[HOME] Pressing btn_close...")
+                self.adb.tap(close[0], close[1])
+                time.sleep(0.5)
+
             if self._trophy_miss_count % 2 == 0:
                 self.adb.tap(10, 10)
                 time.sleep(0.1)
 
             if self._trophy_miss_count % 6 == 0:
-                close = self.vision.find_template(screen, "btn_close", threshold=0.57)
-                if close:
-                    print("[HOME] Pressing btn_close...")
-                    self.adb.tap(close[0], close[1])
-                    time.sleep(0.5)
-                    
                 btn_big_collect = self.vision.find_template(screen, "btn_big_collect", threshold=0.80)
                 if btn_big_collect:
                     print("[HOME] btn_big_collect found, tapping...")
@@ -286,6 +343,30 @@ class RR2Bot:
                     if close:
                         print("[HOME] No collect found, trying btn_close...")
                         self.adb.tap(close[0], close[1])
+
+    # ── Helper: identify the actual screen from its anchor template(s) ───────
+    def _find_state(self, screen):
+        """Probe every state's anchor template(s), independent of self.state. Used
+        only as a resync fallback after a handler's expected anchor keeps missing —
+        cheap enough to run occasionally, too much vision work to run every loop."""
+        if screen is None:
+            return None
+        if self.vision.find_template(screen, "icon_forge", threshold=0.90):
+            return State.HOME
+        if self.vision.find_template(screen, "btn_start_search", threshold=0.80):
+            return State.TROPHY_MENU
+        if self.vision.find_multiple_templates(screen, "area_top_opponent", threshold=0.92):
+            return State.FILTERED_RANKS
+        if self._on_attack_prep_screen(screen):
+            return State.ATTACK_PREP
+        if (self.vision.find_template(screen, "btn_archer", threshold=0.85)
+                or self.vision.find_template(screen, "btn_bring_me_back", threshold=0.85)):
+            return State.GAME_LOAD
+        if (self.vision.find_template(screen, "btn_give_up", threshold=0.70)
+                or self.vision.find_template(screen, "btn_sell", threshold=0.70)
+                or self._find_chests(screen)):
+            return State.CHAMBER_OF_FORTUNE
+        return None
 
     # ── Helper: is the attack-prep screen showing? ────────────────────────────
     def _on_attack_prep_screen(self, screen):
@@ -352,10 +433,29 @@ class RR2Bot:
 
     # ── TROPHY_MENU ───────────────────────────────────────────────────────────
     def handle_trophy_menu(self, screen):
-        yellow = self.vision.find_template(screen, "btn_start_search", threshold=0.95)
+        # 0.80, not the original 0.95 — on LDPlayer this template consistently scores
+        # ~0.84 (stable across frames, so it's a genuine match, not noise), likely due
+        # to rendering differences from the MEmu-captured source image. Ideally
+        # recapture btn_start_search via recrop.py (option 2) on LDPlayer directly.
+        yellow = self.vision.find_template(screen, "btn_start_search", threshold=0.80)
         if yellow:
             self._trophy_menu_miss = 0
+            self._anchor_miss_streak = 0
         
+            if self._drop_trophies:
+                if OWN_TROPHY_REGION:
+                    own_trophies = self.vision.read_region_number(screen, *OWN_TROPHY_REGION)
+                    if own_trophies is not None:
+                        self._trophy_filter = max(100, own_trophies - DROP_TROPHY_MARGIN)
+                        print(f"[TROPHY_MENU] Drop mode: own trophies={own_trophies} → "
+                              f"filter set to {self._trophy_filter}")
+                    else:
+                        print("[TROPHY_MENU] Drop mode: OCR of own trophy count failed, "
+                              f"keeping last filter ({self._trophy_filter})")
+                else:
+                    print("[TROPHY_MENU] Drop mode is on but OWN_TROPHY_REGION isn't set — "
+                          f"using the static --trophy-filter value instead ({self._trophy_filter})")
+
             val_left  = self.vision.read_region_number(screen, 850, 212, 948, 250)
             val_right = self.vision.read_region_number(screen, 1122, 209, 1218, 252)
             print(f"[TROPHY_MENU] OCR → left={val_left}, right={val_right}")
@@ -387,6 +487,7 @@ class RR2Bot:
         print(f"[TROPHY_MENU] Search button not found, tapping blue search coordinates: {BLUE_SEARCH_COORDS}")
         self.adb.tap(*BLUE_SEARCH_COORDS)
         self._trophy_menu_miss += 1
+        self._anchor_miss_streak += 1
         # This used to spin forever with no recovery and no diagnostic trail if the
         # search button never appeared — save one screenshot for later inspection, then
         # eventually restart the game rather than getting stuck for the whole session.
@@ -410,6 +511,7 @@ class RR2Bot:
         opponents = self.vision.find_multiple_templates(screen, "area_top_opponent", threshold=0.92)
         if not opponents:
             self._no_opponent_count += 1
+            self._anchor_miss_streak += 1
             if self._no_opponent_count >= 27:
                 print(f"[FILTERED_RANKS] No sword found after {self._no_opponent_count} attempts — restarting game...")
                 self._no_opponent_count = 0
@@ -430,6 +532,7 @@ class RR2Bot:
             return
 
         self._no_opponent_count = 0
+        self._anchor_miss_streak = 0
         opponents.sort(key=lambda pos: pos[1])
         for i, sword_pos in enumerate(opponents):
             is_last = (i == len(opponents) - 1)
@@ -468,11 +571,13 @@ class RR2Bot:
         # Unattackable opponent: the attack button renders gray instead of yellow.
         # Check this FIRST so we back out in one loop instead of waiting out 12s.
         if self.vision.find_template(screen, "btn_attack_start_gray", threshold=0.90):
+            self._anchor_miss_streak = 0
             self._leave_attack_prep("Attack button is gray (unattackable)", permanent=True)
             return
 
         pos = self.vision.find_template(screen, "btn_attack_start", threshold=0.9)
         if pos:
+            self._anchor_miss_streak = 0
             print("[ATTACK_PREP] Attack button found, pressing → GAME_LOAD...")
             self.adb.tap(*GEAR_SET_3_COORDS)
             time.sleep(0.1)
@@ -482,6 +587,7 @@ class RR2Bot:
         elif time.time() - self._attack_prep_start > 12:
             self._leave_attack_prep("Button not found within 12s")
         else:
+            self._anchor_miss_streak += 1
             print("[ATTACK_PREP] Waiting for attack button...")
 
     # ── GAME_LOAD ─────────────────────────────────────────────────────────────
@@ -528,6 +634,7 @@ class RR2Bot:
         go_back = self.vision.find_template(screen, "btn_bring_me_back", threshold=0.9)
         if go_back:
             self._game_load_miss = 0
+            self._anchor_miss_streak = 0
             self._skip_top += 1
             if self._current_target:
                 self.db.mark_active(self._current_target)
@@ -542,6 +649,7 @@ class RR2Bot:
         archer = self.vision.find_template(screen, "btn_archer", threshold=0.9)
         if archer:
             self._game_load_miss = 0
+            self._anchor_miss_streak = 0
             print("[GAME_LOAD] Archer button visible, match started!")
             self._skip_top = 0
             self.adb.tap(*ARCHER_COORDS)
@@ -553,6 +661,7 @@ class RR2Bot:
             self.state = State.IN_GAME
             return 
         self._game_load_miss += 1
+        self._anchor_miss_streak += 1
         if self._game_load_miss >= 15:
             print(f"[GAME_LOAD] Nothing found for {self._game_load_miss} attempts — restarting game...")
             self._game_load_miss = 0
@@ -572,6 +681,20 @@ class RR2Bot:
     # ── IN_GAME ───────────────────────────────────────────────────────────────
     def handle_in_game(self, screen):
         now = time.time()
+
+        drop_coords_ready = DROP_BUTTON_1_COORDS and DROP_BUTTON_2_COORDS and DROP_HOME_COORDS
+        if (self._drop_trophies and drop_coords_ready
+                and self._in_game_start > 0 and now - self._in_game_start >= 2):
+            print("[IN_GAME] Drop-trophies: 2s elapsed, tapping drop sequence...")
+            self.adb.tap(*DROP_BUTTON_1_COORDS)
+            time.sleep(0.3)
+            self.adb.tap(*DROP_BUTTON_2_COORDS)
+            time.sleep(1.5)
+            self.adb.tap(*DROP_HOME_COORDS)
+            self._in_game_start = 0
+            self.state = State.HOME
+            time.sleep(0.5)
+            return
 
         if self._in_game_start > 0 and now - self._in_game_start > self._in_game_timeout:
             print(f"[IN_GAME] {self._in_game_timeout}s timeout — restarting game...")
