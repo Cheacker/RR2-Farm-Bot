@@ -11,6 +11,9 @@ from player_db import PlayerDB
 FAIL_DEBUG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "fail_debug")
 os.makedirs(FAIL_DEBUG_DIR, exist_ok=True)
 
+CAPTURED_INACTIVES_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "captured_inactives")
+os.makedirs(CAPTURED_INACTIVES_DIR, exist_ok=True)
+
 RR2_PACKAGE            = "com.flaregames.rrtournament"
 EMULATOR_RESTART_INTERVAL = 3 * 3600  # restart the emulator every 3 hours
 
@@ -39,7 +42,7 @@ TROPHY_COORDS       = (1546, 114)     # set with get_coords.py
 COLLECT_ALL_RESOURCES  = (60, 506)     # set with get_coords.py
 BLUE_SEARCH_COORDS  = (1436, 213)
 ARCHER_COORDS      = (200, 800)
-CANNON_COORDS      = (240, 800)
+SECOND_TROOP_SLOT_COORDS      = (240, 800)
 MINUS_LEFT_COORDS  = (810, 226)
 MINUS_RIGHT_COORDS = (1084, 226)
 PLUS_LEFT_COORDS   = (985, 229)
@@ -60,10 +63,10 @@ SCROLL_CONFIRM_COORDS = (812, 832) # ranked-list confirm after scroll — on the
 # and the home-return coordinate, and get_coords.py again (or just eyeball the
 # region) for the OCR box around your own trophy count. Until all four are set,
 # drop mode falls back to the old behavior: a plain timeout + full game restart.
-OWN_TROPHY_REGION    = None  # (x1, y1, x2, y2) OCR region showing your own trophy count
-DROP_BUTTON_1_COORDS = None  # tapped first, 2s after the match starts
-DROP_BUTTON_2_COORDS = None  # tapped right after button 1
-DROP_HOME_COORDS     = None  # final tap that returns to HOME after dropping
+OWN_TROPHY_REGION    = (1413, 112, 1504, 150)  # (x1, y1, x2, y2) OCR region showing your own trophy count
+DROP_BUTTON_1_COORDS = (72, 266)  # tapped first, 2s after the match starts
+DROP_BUTTON_2_COORDS = (605, 484)  # tapped right after button 1
+DROP_HOME_COORDS     = (1114, 788)  # final tap that returns to HOME after dropping
 DROP_TROPHY_MARGIN   = 400   # dynamic filter target = own trophies - this
 
 
@@ -80,7 +83,7 @@ class State:
 
 class RR2Bot:
     def __init__(self, port=21503, template_dir=None, trophy_filter=600, melt_threshold=1_000_000,
-                 drop_trophies=False, ld_index=0, ldconsole=None):
+                 drop_trophies=False, ld_index=0, ldconsole=None, capture_inactives=False):
         self.adb = ADBController(port=port)
         self._ld_index = ld_index
         self._ldconsole = ldconsole or find_ldconsole()
@@ -92,7 +95,7 @@ class RR2Bot:
                 exit(1)
             print("[EMULATOR] No ADB device — closing any existing instance and launching fresh...")
             subprocess.run([self._ldconsole, "quit", "--index", str(self._ld_index)], capture_output=True)
-            time.sleep(3)
+            time.sleep(1)
             subprocess.Popen([self._ldconsole, "launch", "--index", str(self._ld_index)])
             self._emulator_just_launched = True
             print("[EMULATOR] Waiting for the instance to boot...")
@@ -103,13 +106,14 @@ class RR2Bot:
                 if self.adb.device:
                     break
                 self.adb._connect()
-                time.sleep(5)
+                time.sleep(3)
         if not self.adb.device:
             print("ADB connection failed.")
             exit(1)
         self.adb.ensure_resolution(1600, 900)
         self.vision = VisionInterpreter(template_dir=template_dir)
-        if "btn_attack_start_gray" not in self.vision.templates:
+        if not any(n == "btn_attack_start_gray" or n.startswith("btn_attack_start_gray_")
+                   for n in self.vision.templates):
             print("[WARN] btn_attack_start_gray.png missing — unattackable opponents "
                   "will only be caught by the 12s timeout. Capture it with: "
                   "python recrop.py → option 25")
@@ -150,6 +154,8 @@ class RR2Bot:
         self._game_load_miss    = 0
         self._screen_none_count = 0
         self._anchor_miss_streak = 0
+        self._capture_inactives  = capture_inactives
+        self._capture_wait_start = 0
         self.db = PlayerDB()
 
 
@@ -163,12 +169,12 @@ class RR2Bot:
             return
         print(f"[EMULATOR] Closing instance --index {self._ld_index}...")
         subprocess.run([self._ldconsole, "quit", "--index", str(self._ld_index)], capture_output=True)
-        time.sleep(5)
+        time.sleep(3)
         print(f"[EMULATOR] Launching instance --index {self._ld_index}...")
         subprocess.Popen([self._ldconsole, "launch", "--index", str(self._ld_index)])
         self.db.set_last_emulator_restart()
         print("[EMULATOR] Waiting for ADB to be ready...")
-        time.sleep(20)
+        time.sleep(15)
         deadline = time.time() + 75
         while time.time() < deadline:
             self.adb._connect()
@@ -176,7 +182,7 @@ class RR2Bot:
                 print("[EMULATOR] Instance is ready.")
                 self.adb.ensure_resolution(1600, 900)
                 break
-            time.sleep(5)
+            time.sleep(3)
         else:
             print("[EMULATOR] Timeout — instance did not start within 90s.")
         self.db.set_last_emulator_restart()
@@ -237,7 +243,11 @@ class RR2Bot:
                 if   self.state == State.HOME:               self.handle_home(screen)
                 elif self.state == State.TROPHY_MENU:        self.handle_trophy_menu(screen)
                 elif self.state == State.FILTERED_RANKS:     self.handle_filtered_ranks(screen)
-                elif self.state == State.ATTACK_PREP:        self.handle_attack_prep(screen)
+                elif self.state == State.ATTACK_PREP:
+                    if self._capture_inactives:
+                        self.handle_capture_inactives(screen)
+                    else:
+                        self.handle_attack_prep(screen)
                 elif self.state == State.GAME_LOAD:          self.handle_game_load(screen)
                 elif self.state == State.GOING_BACK:         self.handle_going_back(screen)
                 elif self.state == State.IN_GAME:            self.handle_in_game(screen)
@@ -375,7 +385,7 @@ class RR2Bot:
             return False
         return bool(
             self.vision.find_template(screen, "btn_attack_start", threshold=0.85)
-            or self.vision.find_template(screen, "btn_attack_start_gray", threshold=0.85)
+            or self.vision.find_template_variants(screen, "btn_attack_start_gray", threshold=0.85)
         )
 
     # ── Helper: leave attack prep ─────────────────────────────────────────────
@@ -513,10 +523,16 @@ class RR2Bot:
             self._no_opponent_count += 1
             self._anchor_miss_streak += 1
             if self._no_opponent_count >= 27:
-                print(f"[FILTERED_RANKS] No sword found after {self._no_opponent_count} attempts — restarting game...")
+                print(f"[FILTERED_RANKS] No sword found after {self._no_opponent_count} attempts — scanning anchors...")
+                detected = self._find_state(screen)
                 self._no_opponent_count = 0
-                self.adb.restart_game(RR2_PACKAGE)
-                self.state = State.HOME
+                if detected and detected != self.state:
+                    print(f"[FILTERED_RANKS] Resynced to {detected}.")
+                    self.state = detected
+                elif detected == self.state:
+                    print("[FILTERED_RANKS] Screen still matches FILTERED_RANKS — continuing to search.")
+                else:
+                    print("[FILTERED_RANKS] Screen doesn't match any known anchor — continuing to search.")
                 return
             if self._no_opponent_count % 9 == 0:
                 # 0.85, not 0.5 — a 0.5 threshold matches almost anything and
@@ -570,7 +586,7 @@ class RR2Bot:
     def handle_attack_prep(self, screen):
         # Unattackable opponent: the attack button renders gray instead of yellow.
         # Check this FIRST so we back out in one loop instead of waiting out 12s.
-        if self.vision.find_template(screen, "btn_attack_start_gray", threshold=0.90):
+        if self.vision.find_template_variants(screen, "btn_attack_start_gray", threshold=0.90):
             self._anchor_miss_streak = 0
             self._leave_attack_prep("Attack button is gray (unattackable)", permanent=True)
             return
@@ -590,10 +606,45 @@ class RR2Bot:
             self._anchor_miss_streak += 1
             print("[ATTACK_PREP] Waiting for attack button...")
 
+    # ── ATTACK_PREP (capture-inactives mode) ──────────────────────────────────
+    def handle_capture_inactives(self, screen):
+        """Dedicated collection mode (--capture-inactives): stays on the attack-prep
+        screen forever, using the static 'New Opponent' button (SCROLL_CONFIRM_COORDS)
+        to reroll. An attackable (yellow) or already-recognized gray opponent gets
+        rerolled immediately; an opponent where neither renders within 10s is the
+        harder-to-find case — its screenshot is saved to CAPTURED_INACTIVES_DIR for
+        you to crop offline later with crop_from_file.py, which doesn't touch the
+        live device and so can't disrupt this loop while it keeps running."""
+        yellow = self.vision.find_template(screen, "btn_attack_start", threshold=0.85)
+        gray   = self.vision.find_template_variants(screen, "btn_attack_start_gray", threshold=0.85)
+        if yellow:
+            print("[CAPTURE_INACTIVES] Attackable — rerolling for another opponent...")
+            self.adb.tap(*SCROLL_CONFIRM_COORDS)
+            self._capture_wait_start = time.time()
+            time.sleep(1)
+            return
+        if gray:
+            print("[CAPTURE_INACTIVES] Gray button already recognized — rerolling for more...")
+            self.adb.tap(*SCROLL_CONFIRM_COORDS)
+            self._capture_wait_start = time.time()
+            time.sleep(1)
+            return
+        if self._capture_wait_start == 0:
+            self._capture_wait_start = time.time()
+            return
+        if time.time() - self._capture_wait_start >= 10:
+            ts   = time.strftime('%Y%m%d_%H%M%S')
+            path = os.path.join(CAPTURED_INACTIVES_DIR, f'{ts}_unrecognized_attack_prep.png')
+            cv2.imwrite(path, screen)
+            print(f"[CAPTURE_INACTIVES] Neither button recognized for 10s — saved {path}")
+            self.adb.tap(*SCROLL_CONFIRM_COORDS)
+            self._capture_wait_start = time.time()
+            time.sleep(1)
+
     # ── GAME_LOAD ─────────────────────────────────────────────────────────────
     def handle_game_load(self, screen):
         time.sleep(0.1)
-        self.adb.tap(*CANNON_COORDS)
+        self.adb.tap(*SECOND_TROOP_SLOT_COORDS)
         video_btn = self.vision.find_template(screen, "btn_video", threshold=0.90)
         if video_btn:
             print("[GAME_LOAD] Video/food offer detected → buying food...")
@@ -654,9 +705,9 @@ class RR2Bot:
             self._skip_top = 0
             self.adb.tap(*ARCHER_COORDS)
             time.sleep(0.1)
-            self.adb.tap(*CANNON_COORDS)
+            self.adb.tap(*SECOND_TROOP_SLOT_COORDS)
             time.sleep(0.1)
-            self.adb.tap(*CANNON_COORDS)
+            self.adb.tap(*SECOND_TROOP_SLOT_COORDS)
             self._in_game_start = time.time()
             self.state = State.IN_GAME
             return 
@@ -702,12 +753,12 @@ class RR2Bot:
             self.adb.restart_game(RR2_PACKAGE)
             self.state = State.HOME
             return
-        if now - self._last_tap >= 0.65:
+        if now - self._last_tap >= 1:
             self._last_tap = now
             self.adb.tap(*IN_GAME_TAP_COORDS)
             print(f"Tapped: {IN_GAME_TAP_COORDS}")
 
-        if screen is not None and now - self._last_end_check >= 4:
+        if screen is not None and now - self._last_end_check >= 3:
             self._last_end_check = now
             continue_pos = self.vision.find_template(screen, "btn_continue", threshold=0.95)
             if continue_pos:
@@ -853,6 +904,11 @@ if __name__ == "__main__":
                         help="Melt threshold — melt if gold above this, sell otherwise (100000-32000000, default: 1000000)")
     parser.add_argument("--drop-trophies", choices=["drop_yes", "drop_no"], default="drop_no",
                         help="Drop trophies mode: drop_yes ends match after 3s, drop_no after 180s (default: drop_no)")
+    parser.add_argument("--capture-inactives", action="store_true",
+                        help="Collection mode: stays on the attack-prep screen rerolling opponents "
+                             "forever via the static 'New Opponent' button, saving a screenshot to "
+                             "captured_inactives/ whenever neither the yellow nor gray attack button "
+                             "is recognized within 10s. Crop the results offline with crop_from_file.py.")
     args = parser.parse_args()
 
     # Validate ranges
@@ -878,5 +934,6 @@ if __name__ == "__main__":
           f"Trophy filter: {trophy_filter} | Melt threshold: {melt_threshold:,} | Drop trophies: {'YES' if drop_trophies else 'NO'}")
     bot = RR2Bot(port=port, template_dir=template_dir, trophy_filter=trophy_filter,
                  melt_threshold=melt_threshold, drop_trophies=drop_trophies,
-                 ld_index=args.ld_index, ldconsole=ldconsole)
+                 ld_index=args.ld_index, ldconsole=ldconsole,
+                 capture_inactives=args.capture_inactives)
     bot.loop()

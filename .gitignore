@@ -4,3 +4,4 @@ __pycache__/
 *.pyo
 player_data.json
 fail_debug/
+captured_inactives/

@@ -56,6 +56,21 @@ class VisionInterpreter:
             print(f"[VISION] {template_name} not found (max={max_val:.3f}, threshold={threshold})")
         return None
 
+    def find_template_variants(self, screen, prefix, threshold=0.90):
+        """Try every loaded template named `prefix` or `prefix_<anything>` (e.g. multiple
+        hand-captured variants of the same button crop from different screenshots),
+        return the first match found. Lets a button that renders visually differently
+        across situations (like an unattackable-opponent button) be recognized by
+        accumulating more example crops without changing any calling code."""
+        if screen is None:
+            return None
+        for name in sorted(self.templates):
+            if name == prefix or name.startswith(prefix + "_"):
+                pos = self.find_template(screen, name, threshold=threshold)
+                if pos:
+                    return pos
+        return None
+
     def find_multiple_templates(self, screen, template_name, threshold=0.99):
         """Return list of (x, y) for all non-overlapping matches above threshold."""
         if template_name not in self.templates or screen is None:
