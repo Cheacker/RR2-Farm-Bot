@@ -366,7 +366,7 @@ class RR2Bot:
             return State.HOME
         if self.vision.find_template(screen, "btn_start_search", threshold=0.80):
             return State.TROPHY_MENU
-        if self.vision.find_multiple_templates(screen, "area_top_opponent", threshold=0.92):
+        if self.vision.find_multiple_templates(screen, "area_top_opponent", threshold=0.90):
             return State.FILTERED_RANKS
         if self._on_attack_prep_screen(screen):
             return State.ATTACK_PREP
@@ -438,7 +438,7 @@ class RR2Bot:
         while time.time() < deadline:
             time.sleep(0.3)
             after = self.adb.current_screen()
-            if after is not None and self.vision.find_multiple_templates(after, "area_top_opponent", threshold=0.92):
+            if after is not None and self.vision.find_multiple_templates(after, "area_top_opponent", threshold=0.90):
                 break
         print(f"List scrolled {times} time(s).")
         self._skip_top = 0
@@ -539,7 +539,11 @@ class RR2Bot:
 
     # ── FILTERED_RANKS ────────────────────────────────────────────────────────
     def handle_filtered_ranks(self, screen):
-        opponents = self.vision.find_multiple_templates(screen, "area_top_opponent", threshold=0.92)
+        # 0.90, not the original 0.92 — confirmed live that real, changing swords in
+        # the list were plateauing at 0.903-0.904 (vs. 0.921-0.927 for ones that did
+        # match), same rendering-gap class of issue as btn_start_search. The noise
+        # floor on unrelated screens is ~0.28-0.31, so there's still large margin here.
+        opponents = self.vision.find_multiple_templates(screen, "area_top_opponent", threshold=0.90)
         if not opponents:
             self._no_opponent_count += 1
             self._anchor_miss_streak += 1
@@ -820,7 +824,7 @@ class RR2Bot:
         if self._gold_last is not None and self._gold_start is not None:
             gold_gain  = self._gold_last  - self._gold_start
             pearl_gain = self._pearl_last - self._pearl_start
-            resources  = f" | Gold: ~+{gold_gain:,} | Pearls: ~+{pearl_gain}"
+            resources  = f" | Gold: +{gold_gain:,} | Pearls: +{pearl_gain}"
         else:
             resources = ""
         print("--------------------------------------------------------------------")
