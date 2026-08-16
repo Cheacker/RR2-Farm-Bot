@@ -112,8 +112,7 @@ class RR2Bot:
             exit(1)
         self.adb.ensure_resolution(1600, 900)
         self.vision = VisionInterpreter(template_dir=template_dir)
-        if not any(n == "btn_attack_start_gray" or n.startswith("btn_attack_start_gray_")
-                   for n in self.vision.templates):
+        if "btn_attack_start_gray" not in self.vision.templates:
             print("[WARN] btn_attack_start_gray.png missing — unattackable opponents "
                   "will only be caught by the 12s timeout. Capture it with: "
                   "python recrop.py → option 25")
@@ -385,7 +384,7 @@ class RR2Bot:
             return False
         return bool(
             self.vision.find_template(screen, "btn_attack_start", threshold=0.85)
-            or self.vision.find_template_variants(screen, "btn_attack_start_gray", threshold=0.85)
+            or self.vision.find_template(screen, "btn_attack_start_gray", threshold=0.85)
         )
 
     # ── Helper: leave attack prep ─────────────────────────────────────────────
@@ -524,7 +523,13 @@ class RR2Bot:
             self._anchor_miss_streak += 1
             if self._no_opponent_count >= 27:
                 print(f"[FILTERED_RANKS] No sword found after {self._no_opponent_count} attempts — scanning anchors...")
-                detected = self._find_state(screen)
+                detected = None
+                for attempt in range(10):
+                    f = self.adb.current_screen() if attempt > 0 else screen
+                    detected = self._find_state(f)
+                    if detected:
+                        break
+                    time.sleep(0.5)
                 self._no_opponent_count = 0
                 if detected and detected != self.state:
                     print(f"[FILTERED_RANKS] Resynced to {detected}.")
@@ -532,7 +537,7 @@ class RR2Bot:
                 elif detected == self.state:
                     print("[FILTERED_RANKS] Screen still matches FILTERED_RANKS — continuing to search.")
                 else:
-                    print("[FILTERED_RANKS] Screen doesn't match any known anchor — continuing to search.")
+                    print("[FILTERED_RANKS] No anchor matched after retrying — continuing to search.")
                 return
             if self._no_opponent_count % 9 == 0:
                 # 0.85, not 0.5 — a 0.5 threshold matches almost anything and
@@ -586,7 +591,7 @@ class RR2Bot:
     def handle_attack_prep(self, screen):
         # Unattackable opponent: the attack button renders gray instead of yellow.
         # Check this FIRST so we back out in one loop instead of waiting out 12s.
-        if self.vision.find_template_variants(screen, "btn_attack_start_gray", threshold=0.90):
+        if self.vision.find_template(screen, "btn_attack_start_gray", threshold=0.90):
             self._anchor_miss_streak = 0
             self._leave_attack_prep("Attack button is gray (unattackable)", permanent=True)
             return
@@ -616,7 +621,7 @@ class RR2Bot:
         you to crop offline later with crop_from_file.py, which doesn't touch the
         live device and so can't disrupt this loop while it keeps running."""
         yellow = self.vision.find_template(screen, "btn_attack_start", threshold=0.85)
-        gray   = self.vision.find_template_variants(screen, "btn_attack_start_gray", threshold=0.85)
+        gray   = self.vision.find_template(screen, "btn_attack_start_gray", threshold=0.85)
         if yellow:
             print("[CAPTURE_INACTIVES] Attackable — rerolling for another opponent...")
             self.adb.tap(*SCROLL_CONFIRM_COORDS)
@@ -714,8 +719,18 @@ class RR2Bot:
         self._game_load_miss += 1
         self._anchor_miss_streak += 1
         if self._game_load_miss >= 15:
-            print(f"[GAME_LOAD] Nothing found for {self._game_load_miss} attempts — restarting game...")
+            # Don't restart blind — the match may already have finished (btn_archer can
+            # be missed entirely if it renders differently than the template expects),
+            # in which case a restart here tears down the app mid-loot-screen instead of
+            # just noticing we're actually on COF/HOME/wherever and continuing from there.
+            print(f"[GAME_LOAD] Nothing found for {self._game_load_miss} attempts — scanning anchors...")
+            detected = self._find_state(screen)
             self._game_load_miss = 0
+            if detected and detected != self.state:
+                print(f"[GAME_LOAD] Resynced to {detected}.")
+                self.state = detected
+                return
+            print(f"[GAME_LOAD] Still unresolved (detected={detected}) — restarting game...")
             self.adb.restart_game(RR2_PACKAGE)
             self.state = State.HOME
             return
@@ -738,10 +753,12 @@ class RR2Bot:
                 and self._in_game_start > 0 and now - self._in_game_start >= 2):
             print("[IN_GAME] Drop-trophies: 2s elapsed, tapping drop sequence...")
             self.adb.tap(*DROP_BUTTON_1_COORDS)
-            time.sleep(0.3)
+            time.sleep(0.5)
             self.adb.tap(*DROP_BUTTON_2_COORDS)
-            time.sleep(1.5)
-            self.adb.tap(*DROP_HOME_COORDS)
+            time.sleep(5)
+            for _ in range(3):
+                self.adb.tap(*DROP_HOME_COORDS)
+                time.sleep(1)
             self._in_game_start = 0
             self.state = State.HOME
             time.sleep(0.5)
