@@ -8,9 +8,4 @@ fail_debug/
 captured_inactives/
 .zipmem/
 CLAUDE.md
-crop_from_file.py
-debug_ocr.py
-get_coords.py
-recrop.py
-leftovertasks.txt
-memu_baglanti_guvenlik.txt
+dev_tools/

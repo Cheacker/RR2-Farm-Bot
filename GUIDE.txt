@@ -187,6 +187,8 @@ MEmu HyperV — enabling Windows Hyper-V:
   7. If the bot stops for any reason, simply run the same command again.
 
   TIPS:
+  
+────────────────
   • Do not click inside the MEmu window while the bot is running — it will
     interfere with the bot's taps.
   • You can minimize the MEmu window; the bot will still work.
@@ -213,7 +215,7 @@ Files worth checking:
   src\controller.py — sends taps and swipes to the emulator via ADB
   src\vision.py     — searches for buttons and icons in screenshots
   src\player_db.py  — saves active player records to player_data.json
-  recrop.py         — helper tool to capture new template images
+  dev_tools/recrop.py         — helper tool to capture new template images
 
 The only library that makes a network connection is adbutils, and it
 connects only to your local emulator (127.0.0.1), not to the internet.
@@ -251,16 +253,16 @@ Fix:     Tesseract is not installed, or the path in src\vision.py is wrong.
 
 Problem: Bot cannot find the trophy icon (shuts down after 20 misses)
 Fix:     Your game resolution or language differs from the templates.
-         Re-capture icon_trophy using recrop.py (option 1).
+         Re-capture icon_trophy using dev_tools/recrop.py (option 1).
          Make sure the Android device language is set to English.
 
 Problem: Bot cannot find any swords (shuts down after 27 misses)
 Fix:     The ranking list is not visible. Re-capture area_top_opponent
-         using recrop.py (option 3).
+         using dev_tools/recrop.py (option 3).
 
 Problem: Bot clicks in the wrong place
 Fix:     Update BLUE_SEARCH_COORDS, ARCHER_COORDS, CANNON_COORDS in
-         src\bot.py using get_coords.py to find the correct positions.
+         src\bot.py using dev_tools/get_coords.py to find the correct positions.
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -270,12 +272,12 @@ Fix:     Update BLUE_SEARCH_COORDS, ARCHER_COORDS, CANNON_COORDS in
 Templates are the reference images the bot uses to locate buttons on screen.
 If your emulator screen looks different from the defaults, run:
 
-    python recrop.py
+    python dev_tools/recrop.py
 
 and re-capture the templates that are failing. All images are saved to
 En_Templates. You only need to recapture the ones that are not working.
 
-Template capture checklist (use recrop.py menu numbers):
+Template capture checklist (use dev_tools/recrop.py menu numbers):
 
    1. icon_trophy
    2. btn_start_search

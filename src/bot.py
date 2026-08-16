@@ -39,8 +39,8 @@ def find_ldconsole():
     return None
 
 # ── Coordinates ──────────────────────────────────────────────────────────────
-TROPHY_COORDS       = (1546, 114)     # set with get_coords.py
-COLLECT_ALL_RESOURCES  = (60, 506)     # set with get_coords.py
+TROPHY_COORDS       = (1546, 114)     # set with dev_tools/get_coords.py
+COLLECT_ALL_RESOURCES  = (60, 506)     # set with dev_tools/get_coords.py
 BLUE_SEARCH_COORDS  = (1436, 213)
 ARCHER_COORDS      = (200, 800)
 SECOND_TROOP_SLOT_COORDS      = (240, 800)
@@ -60,8 +60,8 @@ SCROLL_CONFIRM_COORDS = (896, 785) # ranked-list confirm after scroll — on the
                                    # so never tap it without confirming the screen
 
 # ── Drop-trophies mode (only used when --drop-trophies drop_yes) ─────────────
-# All four are unset until captured — get_coords.py for the two tap coordinates
-# and the home-return coordinate, and get_coords.py again (or just eyeball the
+# All four are unset until captured — dev_tools/get_coords.py for the two tap coordinates
+# and the home-return coordinate, and dev_tools/get_coords.py again (or just eyeball the
 # region) for the OCR box around your own trophy count. Until all four are set,
 # drop mode falls back to the old behavior: a plain timeout + full game restart.
 OWN_TROPHY_REGION    = (1413, 112, 1504, 150)  # (x1, y1, x2, y2) OCR region showing your own trophy count
@@ -116,16 +116,16 @@ class RR2Bot:
         if "btn_attack_start_gray" not in self.vision.templates:
             print("[WARN] btn_attack_start_gray.png missing — unattackable opponents "
                   "will only be caught by the 12s timeout. Capture it with: "
-                  "python recrop.py → option 25")
+                  "python dev_tools/recrop.py → option 25")
         if drop_trophies and not (OWN_TROPHY_REGION and DROP_BUTTON_1_COORDS
                                    and DROP_BUTTON_2_COORDS and DROP_HOME_COORDS):
             print("[WARN] --drop-trophies is on but the drop-mode coordinates in bot.py "
                   "aren't set — falling back to the old timeout+restart behavior. Fill in, "
                   "at the top of bot.py: OWN_TROPHY_REGION (OCR box around your own trophy "
-                  "count, x1,y1,x2,y2 — use get_coords.py to find the corners), "
+                  "count, x1,y1,x2,y2 — use dev_tools/get_coords.py to find the corners), "
                   "DROP_BUTTON_1_COORDS and DROP_BUTTON_2_COORDS (the two buttons tapped in "
                   "order 2s after a match starts to end it), and DROP_HOME_COORDS (final tap "
-                  "back to HOME) — all via get_coords.py.")
+                  "back to HOME) — all via dev_tools/get_coords.py.")
         self.state  = State.HOME
         self.running = True
 
@@ -461,7 +461,7 @@ class RR2Bot:
         # 0.80, not the original 0.95 — on LDPlayer this template consistently scores
         # ~0.84 (stable across frames, so it's a genuine match, not noise), likely due
         # to rendering differences from the MEmu-captured source image. Ideally
-        # recapture btn_start_search via recrop.py (option 2) on LDPlayer directly.
+        # recapture btn_start_search via dev_tools/recrop.py (option 2) on LDPlayer directly.
         yellow = self.vision.find_template(screen, "btn_start_search", threshold=0.80)
         if yellow:
             self._trophy_menu_miss = 0
@@ -638,7 +638,7 @@ class RR2Bot:
         to reroll. An attackable (yellow) or already-recognized gray opponent gets
         rerolled immediately; an opponent where neither renders within 10s is the
         harder-to-find case — its screenshot is saved to CAPTURED_INACTIVES_DIR for
-        you to crop offline later with crop_from_file.py, which doesn't touch the
+        you to crop offline later with dev_tools/crop_from_file.py, which doesn't touch the
         live device and so can't disrupt this loop while it keeps running."""
         yellow = self.vision.find_template(screen, "btn_attack_start", threshold=0.85)
         gray   = self.vision.find_template(screen, "btn_attack_start_gray", threshold=0.85)
@@ -945,7 +945,7 @@ if __name__ == "__main__":
                         help="Collection mode: stays on the attack-prep screen rerolling opponents "
                              "forever via the static 'New Opponent' button, saving a screenshot to "
                              "captured_inactives/ whenever neither the yellow nor gray attack button "
-                             "is recognized within 10s. Crop the results offline with crop_from_file.py.")
+                             "is recognized within 10s. Crop the results offline with dev_tools/crop_from_file.py.")
     args = parser.parse_args()
 
     # Validate ranges
