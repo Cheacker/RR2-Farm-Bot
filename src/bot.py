@@ -55,7 +55,7 @@ GEAR_SET_3_COORDS  = (366, 818)
 VIDEO_CLOSE_COORDS = (1522, 94)
 SHOP_COORDS        = (1540, 508)
 GREEN_BACK_COORDS  = (1430, 85)    # back out of attack prep / loading screen
-SCROLL_CONFIRM_COORDS = (812, 832) # ranked-list confirm after scroll — on the
+SCROLL_CONFIRM_COORDS = (896, 785) # ranked-list confirm after scroll — on the
                                    # attack-prep screen this is "New Opponent",
                                    # so never tap it without confirming the screen
 
@@ -279,7 +279,7 @@ class RR2Bot:
                 self.running = False
             except Exception as e:
                 print(f"Error: {e}")
-                time.sleep(2)
+                time.sleep(0.5)
 
     # ── HOME ──────────────────────────────────────────────────────────────────
     def handle_home(self, screen):
@@ -318,42 +318,36 @@ class RR2Bot:
             # icon is missing because a popup/shop leftover is covering the screen
             # (e.g. after the GAME_LOAD food-purchase flow didn't fully close out),
             # waiting up to 6 misses to even try closing it just prolongs being stuck.
+            
+            collect = self.vision.find_template(screen, "btn_collect", threshold=0.80)
+            if collect:
+                print(f"[HOME] {self._trophy_miss_count}th miss → pressing btn_collect...")
+                self.adb.tap(collect[0], collect[1])
+                time.sleep(3.5)
+                self.adb.tap(1524, 86)
+
             close = self.vision.find_template(screen, "btn_close", threshold=0.57)
             if close:
                 print("[HOME] Pressing btn_close...")
                 self.adb.tap(close[0], close[1])
-                time.sleep(0.5)
+                time.sleep(0.3)
 
             if self._trophy_miss_count % 2 == 0:
                 self.adb.tap(10, 10)
                 time.sleep(0.1)
 
-            if self._trophy_miss_count % 6 == 0:
+            if self._trophy_miss_count % 10 == 0:
                 btn_big_collect = self.vision.find_template(screen, "btn_big_collect", threshold=0.80)
                 if btn_big_collect:
                     print("[HOME] btn_big_collect found, tapping...")
                     self.adb.tap(btn_big_collect[0], btn_big_collect[1])
-                    time.sleep(0.5)
+                    time.sleep(1)
 
-            if self._trophy_miss_count % 10 == 0:
                 league = self.vision.find_template(screen, "btn_collect_league", threshold=0.80)
                 if league:
                     print(f"[HOME] {self._trophy_miss_count}th miss → pressing btn_collect_league...")
                     self.adb.tap(league[0], league[1])
-                    time.sleep(1.0)
-
-            if self._trophy_miss_count % 5 == 0:
-                collect = self.vision.find_template(screen, "btn_collect", threshold=0.80)
-                if collect:
-                    print(f"[HOME] {self._trophy_miss_count}th miss → pressing btn_collect...")
-                    self.adb.tap(collect[0], collect[1])
-                    time.sleep(3.5)
-                    self.adb.tap(1524, 86)
-                else:
-                    close = self.vision.find_template(screen, "btn_close", threshold=0.80)
-                    if close:
-                        print("[HOME] No collect found, trying btn_close...")
-                        self.adb.tap(close[0], close[1])
+                    time.sleep(1)
 
     # ── Helper: identify the actual screen from its anchor template(s) ───────
     def _find_state(self, screen):
@@ -417,7 +411,7 @@ class RR2Bot:
     def _scroll_list(self, times=1, before_screen=None):
         for _ in range(times):
             self.adb.swipe(650, 600, 650, 300, 300)
-            time.sleep(0.4)
+            time.sleep(0.6)
         # Guard the blind confirm tap — if we are actually on the attack-prep
         # screen this coordinate is "New Opponent" (unfiltered reroll, costs trophies).
         f = self.adb.current_screen()
@@ -456,7 +450,7 @@ class RR2Bot:
             if self._scroll_no_progress >= 2:
                 print("[SCROLL] List appears exhausted — returning to TROPHY_MENU for a fresh search.")
                 self.adb.tap(*GREEN_BACK_COORDS)
-                time.sleep(0.6)
+                time.sleep(0.5)
                 self.state = State.TROPHY_MENU
                 self._scroll_no_progress = 0
         else:
@@ -630,7 +624,7 @@ class RR2Bot:
             time.sleep(0.1)
             self.adb.tap(pos[0], pos[1])
             self.state = State.GAME_LOAD
-            time.sleep(0.2)
+
         elif time.time() - self._attack_prep_start > 12:
             self._leave_attack_prep("Button not found within 12s")
         else:
@@ -652,25 +646,25 @@ class RR2Bot:
             print("[CAPTURE_INACTIVES] Attackable — rerolling for another opponent...")
             self.adb.tap(*SCROLL_CONFIRM_COORDS)
             self._capture_wait_start = time.time()
-            time.sleep(1)
+            time.sleep(0.5)
             return
         if gray:
             print("[CAPTURE_INACTIVES] Gray button already recognized — rerolling for more...")
             self.adb.tap(*SCROLL_CONFIRM_COORDS)
             self._capture_wait_start = time.time()
-            time.sleep(1)
+            time.sleep(0.5)
             return
         if self._capture_wait_start == 0:
             self._capture_wait_start = time.time()
             return
-        if time.time() - self._capture_wait_start >= 10:
+        if time.time() - self._capture_wait_start >= 15:
             ts   = time.strftime('%Y%m%d_%H%M%S')
             path = os.path.join(CAPTURED_INACTIVES_DIR, f'{ts}_unrecognized_attack_prep.png')
             cv2.imwrite(path, screen)
             print(f"[CAPTURE_INACTIVES] Neither button recognized for 10s — saved {path}")
             self.adb.tap(*SCROLL_CONFIRM_COORDS)
             self._capture_wait_start = time.time()
-            time.sleep(1)
+            time.sleep(0.5)
 
     # ── GAME_LOAD ─────────────────────────────────────────────────────────────
     def handle_game_load(self, screen):
@@ -859,7 +853,7 @@ class RR2Bot:
             if pes:
                 print(f"[COF] Give up (1 buttons), tapping leftmost: {pes}")
                 self.adb.tap(pes[0], pes[1])
-                time.sleep(3)
+                time.sleep(2.25)
                 self._cof_tap_home()
                 return
 

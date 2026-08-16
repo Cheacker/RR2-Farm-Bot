@@ -165,7 +165,7 @@ class ADBController:
         else:
             print(f"[ADB] Could not resolve launcher activity, falling back to monkey: {package}")
             self.device.shell(f"monkey -p {package} -c android.intent.category.LAUNCHER 1")
-        time.sleep(5)
+        time.sleep(13)
 
 
 if __name__ == "__main__":
