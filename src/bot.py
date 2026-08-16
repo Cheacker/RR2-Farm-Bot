@@ -4,6 +4,7 @@ import glob
 import argparse
 import subprocess
 import cv2
+import numpy as np
 from controller import ADBController
 from vision import VisionInterpreter
 from player_db import PlayerDB
@@ -155,6 +156,7 @@ class RR2Bot:
         self._anchor_miss_streak = 0
         self._capture_inactives  = capture_inactives
         self._capture_wait_start = 0
+        self._scroll_no_progress = 0
         self.db = PlayerDB()
 
 
@@ -412,7 +414,7 @@ class RR2Bot:
         time.sleep(0.6)
 
     # ── Helper: scroll ranked list ────────────────────────────────────────────
-    def _scroll_list(self, times=1):
+    def _scroll_list(self, times=1, before_screen=None):
         for _ in range(times):
             self.adb.swipe(650, 600, 650, 300, 300)
             time.sleep(0.4)
@@ -432,13 +434,33 @@ class RR2Bot:
         # fixed sleep that's too short hands handle_filtered_ranks a still-loading
         # screen, which reads as "no swords found" and looks like vision breaking.
         deadline = time.time() + 5
+        after = None
         while time.time() < deadline:
             time.sleep(0.3)
-            f = self.adb.current_screen()
-            if f is not None and self.vision.find_multiple_templates(f, "area_top_opponent", threshold=0.92):
+            after = self.adb.current_screen()
+            if after is not None and self.vision.find_multiple_templates(after, "area_top_opponent", threshold=0.92):
                 break
         print(f"List scrolled {times} time(s).")
         self._skip_top = 0
+
+        # If the swipe produced a screen that's byte-for-byte identical to the one
+        # before it, the list has hit its end and scrolling can't reveal anything
+        # new — that's the "stuck scrolling forever, same score every time" failure
+        # mode. Escape to TROPHY_MENU for a fresh search instead of scrolling into
+        # the same dead end indefinitely.
+        if (before_screen is not None and after is not None
+                and before_screen.shape == after.shape
+                and np.array_equal(before_screen, after)):
+            self._scroll_no_progress += 1
+            print(f"[SCROLL] Screen unchanged after swipe ({self._scroll_no_progress}x) — list may be exhausted.")
+            if self._scroll_no_progress >= 2:
+                print("[SCROLL] List appears exhausted — returning to TROPHY_MENU for a fresh search.")
+                self.adb.tap(*GREEN_BACK_COORDS)
+                time.sleep(0.6)
+                self.state = State.TROPHY_MENU
+                self._scroll_no_progress = 0
+        else:
+            self._scroll_no_progress = 0
 
     # ── TROPHY_MENU ───────────────────────────────────────────────────────────
     def handle_trophy_menu(self, screen):
@@ -549,7 +571,7 @@ class RR2Bot:
                     return
             if self._no_opponent_count % 3 == 0:
                 print(f"[FILTERED_RANKS] No sword found after {self._no_opponent_count} attempts, scrolling...")
-                self._scroll_list()
+                self._scroll_list(before_screen=screen)
             return
 
         self._no_opponent_count = 0
@@ -561,7 +583,7 @@ class RR2Bot:
             if not name:
                 if is_last:
                     print("[FILTERED_RANKS] Last opponent name unreadable (partially visible) → scrolling")
-                    self._scroll_list()
+                    self._scroll_list(before_screen=screen)
                     return
                 print("[FILTERED_RANKS] Could not read player name → skipping")
                 continue
@@ -576,7 +598,7 @@ class RR2Bot:
                 if self._skip_top >= 4:
                     self._scroll_count += 1
                     print(f"[FILTERED_RANKS] skip={self._skip_top} >= 4, scrolling x{self._scroll_count}...")
-                    self._scroll_list(self._scroll_count)
+                    self._scroll_list(self._scroll_count, before_screen=screen)
                 continue
             print(f"[FILTERED_RANKS] Tapping: {sword_pos}")
             self._current_target = name
