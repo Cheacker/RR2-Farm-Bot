@@ -840,10 +840,24 @@ class RR2Bot:
         return positions
 
     # ── CHAMBER_OF_FORTUNE ────────────────────────────────────────────────────
+    # COF's inner loops run outside the main loop() iteration, so none of the
+    # top-level safety nets (3h restart timer, screen-none counter, anchor-miss
+    # resync) can see or recover a hang in here -- a wedged COF state (stale/weak
+    # chest-template matches, an animation the vision keeps half-matching, etc.)
+    # would otherwise spin on time.sleep(0.1) forever with zero escape. This is a
+    # hard wall-clock ceiling per loop, independent of any per-iteration counter.
+    _COF_LOOP_TIMEOUT = 90
+
     def handle_chamber_of_fortune(self, screen):
         time.sleep(1)
         missed_chests = 0
+        loop1_start = time.time()
         while self.running and self._chest_taps < 3:
+            if time.time() - loop1_start > self._COF_LOOP_TIMEOUT:
+                print(f"[COF] Chest-opening loop stuck for {self._COF_LOOP_TIMEOUT}s — restarting game...")
+                self.adb.restart_game(RR2_PACKAGE)
+                self.state = State.HOME
+                return
             time.sleep(0.1)
             f = self.adb.current_screen()
             if f is None:
@@ -890,7 +904,13 @@ class RR2Bot:
                 if new_count == 6 - (self._chest_taps + 1):
                     self._chest_taps += 1
 
+        loop2_start = time.time()
         while self.running:
+            if time.time() - loop2_start > self._COF_LOOP_TIMEOUT:
+                print(f"[COF] Post-chest loop stuck for {self._COF_LOOP_TIMEOUT}s — restarting game...")
+                self.adb.restart_game(RR2_PACKAGE)
+                self.state = State.HOME
+                return
             time.sleep(0.1)
             f = self.adb.current_screen()
             if f is None:
