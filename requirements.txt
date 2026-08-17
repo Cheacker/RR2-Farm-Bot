@@ -1,0 +1,4 @@
+adbutils
+opencv-python
+pytesseract
+numpy
