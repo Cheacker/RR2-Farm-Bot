@@ -418,9 +418,8 @@ class RR2Bot:
     def _scroll_list(self, times=1, before_screen=None):
         for _ in range(times):
             self.adb.swipe(650, 600, 650, 300, 300)
-            time.sleep(0.1)
+            time.sleep(1.5)
             self.adb.tap(800, 806)
-            time.sleep(0.6)
         # Guard the blind confirm tap — if we are actually on the attack-prep
         # screen this coordinate is "New Opponent" (unfiltered reroll, costs trophies).
         f = self.adb.current_screen()
@@ -743,6 +742,9 @@ class RR2Bot:
             time.sleep(0.1)
             self.adb.tap(*SECOND_TROOP_SLOT_COORDS)
             self._in_game_start = time.time()
+            time.sleep(0.3)
+            self.adb.tap(*SECOND_TROOP_SLOT_COORDS)
+            self.adb.tap(*ARCHER_COORDS)
             self.state = State.IN_GAME
             return 
         self._game_load_miss += 1
@@ -827,7 +829,7 @@ class RR2Bot:
         if self._gold_last is not None and self._gold_start is not None:
             gold_gain  = self._gold_last  - self._gold_start
             pearl_gain = self._pearl_last - self._pearl_start
-            resources  = f" | Gold: +{gold_gain:,} | Pearls: +{pearl_gain}"
+            resources  = f" | Gold: + {gold_gain:,} | Pearls: +{pearl_gain}"
         else:
             resources = ""
         print("--------------------------------------------------------------------")
