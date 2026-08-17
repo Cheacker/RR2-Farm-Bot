@@ -89,12 +89,12 @@ class RR2Bot:
         self._ld_index = ld_index
         self._ldconsole = ldconsole or find_ldconsole()
         self._emulator_just_launched = False
-        if not self.adb.device:
-            if not self._ldconsole:
-                print("[EMULATOR] No ADB device, and ldconsole.exe could not be auto-detected — "
-                      "start the LDPlayer instance manually, or pass its path with --ldconsole.")
-                exit(1)
-            print("[EMULATOR] No ADB device — closing any existing instance and launching fresh...")
+        if self._ldconsole:
+            # Always force a clean LDPlayer restart on startup, even if ADB already
+            # sees a device -- the instance itself can end up in a wedged state
+            # (rendering stalls, input stops registering, etc.) that a healthy-looking
+            # ADB connection doesn't reveal. A cold restart is the reliable baseline.
+            print(f"[EMULATOR] Restarting LDPlayer instance --index {self._ld_index} for a clean start...")
             subprocess.run([self._ldconsole, "quit", "--index", str(self._ld_index)], capture_output=True)
             time.sleep(1)
             subprocess.Popen([self._ldconsole, "launch", "--index", str(self._ld_index)])
@@ -108,6 +108,13 @@ class RR2Bot:
                     break
                 self.adb._connect()
                 time.sleep(3)
+        elif not self.adb.device:
+            print("[EMULATOR] No ADB device, and ldconsole.exe could not be auto-detected — "
+                  "start the LDPlayer instance manually, or pass its path with --ldconsole.")
+            exit(1)
+        else:
+            print("[EMULATOR] ldconsole.exe not found — using the already-connected device "
+                  "as-is instead of forcing a restart. Pass --ldconsole to enable that.")
         if not self.adb.device:
             print("ADB connection failed.")
             exit(1)
@@ -411,6 +418,8 @@ class RR2Bot:
     def _scroll_list(self, times=1, before_screen=None):
         for _ in range(times):
             self.adb.swipe(650, 600, 650, 300, 300)
+            time.sleep(0.1)
+            self.adb.tap(800, 806)
             time.sleep(0.6)
         # Guard the blind confirm tap — if we are actually on the attack-prep
         # screen this coordinate is "New Opponent" (unfiltered reroll, costs trophies).
