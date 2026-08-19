@@ -349,6 +349,18 @@ class RR2Bot:
                     self._anchor_miss_streak = 0
                     return
 
+                # 'Connected another device' popup uses the same button/template as
+                # GAME_LOAD's btn_take_me_back — checked here too since this popup can
+                # also interrupt at HOME.
+                take_me_back = self.vision.find_template(screen, "btn_take_me_back", threshold=0.85)
+                if take_me_back:
+                    print("[HOME] 'Connected another device' popup detected — dismissing...")
+                    self.adb.tap(take_me_back[0], take_me_back[1])
+                    time.sleep(RESTART_GAME_WAIT)
+                    self._trophy_miss_count = 0
+                    self._anchor_miss_streak = 0
+                    return
+
             # Search for btn_close on every miss, not just every 6th — if the forge
             # icon is missing because a popup/shop leftover is covering the screen
             # (e.g. after the GAME_LOAD food-purchase flow didn't fully close out),
@@ -393,7 +405,8 @@ class RR2Bot:
             return None
         if (self.vision.find_template(screen, "icon_forge", threshold=0.90)
                 or self.vision.find_template(screen, "btn_take_a_break", threshold=0.85)
-                or self.vision.find_template(screen, "btn_king_claim", threshold=0.85)):
+                or self.vision.find_template(screen, "btn_king_claim", threshold=0.85)
+                or self.vision.find_template(screen, "btn_take_me_back", threshold=0.85)):
             return State.HOME
         if self.vision.find_template(screen, "btn_start_search", threshold=0.80):
             return State.TROPHY_MENU
