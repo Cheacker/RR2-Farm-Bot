@@ -34,7 +34,8 @@ SESSIONS = {
     "24": ("League collect button (home screen)",                    ["btn_collect_league"]),
     "25": ("GRAY attack button (unattackable opponent, pre-match screen)", ["btn_attack_start_gray"]),
     "26": ("'Take a break' reminder popup button (usually home screen)", ["btn_take_a_break"]),
-    "27": ("'I am the King' claim popup button (home screen)", ["btn_king_claim"])
+    "27": ("'I am the King' claim popup button (home screen)", ["btn_king_claim"]),
+    "28": ("'Connected another device' popup button (home screen)", ["btn_connected_device"])
 
 }
 

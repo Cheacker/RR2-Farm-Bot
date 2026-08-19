@@ -325,27 +325,38 @@ class RR2Bot:
                 self.state = State.HOME
                 return
 
-            # Full-screen blocking popups that icon_forge can never see past. These are
-            # checked before everything else in this branch since nothing else here
-            # (btn_close, btn_collect, ...) can dismiss them.
-            take_break = self.vision.find_template(screen, "btn_take_a_break", threshold=0.85)
-            if take_break:
-                print("[HOME] 'Take a break' popup detected — waiting 30s before dismissing...")
-                time.sleep(30)
-                self.adb.tap(take_break[0], take_break[1])
-                time.sleep(RESTART_GAME_WAIT)
-                self._trophy_miss_count = 0
-                self._anchor_miss_streak = 0
-                return
+            # Full-screen blocking popups that icon_forge can never see past. Checked
+            # only every 10th miss, same cadence as the other rare popup checks below —
+            # these are uncommon enough that scanning for them on every single miss
+            # would just be wasted vision work.
+            if self._trophy_miss_count % 10 == 0:
+                take_break = self.vision.find_template(screen, "btn_take_a_break", threshold=0.85)
+                if take_break:
+                    print("[HOME] 'Take a break' popup detected — waiting 30s before dismissing...")
+                    time.sleep(30)
+                    self.adb.tap(take_break[0], take_break[1])
+                    time.sleep(RESTART_GAME_WAIT)
+                    self._trophy_miss_count = 0
+                    self._anchor_miss_streak = 0
+                    return
 
-            king = self.vision.find_template(screen, "btn_king_claim", threshold=0.85)
-            if king:
-                print("[HOME] 'I am the King' popup detected — claiming...")
-                self.adb.tap(king[0], king[1])
-                time.sleep(RESTART_GAME_WAIT)
-                self._trophy_miss_count = 0
-                self._anchor_miss_streak = 0
-                return
+                king = self.vision.find_template(screen, "btn_king_claim", threshold=0.85)
+                if king:
+                    print("[HOME] 'I am the King' popup detected — claiming...")
+                    self.adb.tap(king[0], king[1])
+                    time.sleep(RESTART_GAME_WAIT)
+                    self._trophy_miss_count = 0
+                    self._anchor_miss_streak = 0
+                    return
+
+                connected_device = self.vision.find_template(screen, "btn_connected_device", threshold=0.85)
+                if connected_device:
+                    print("[HOME] 'Connected another device' popup detected — dismissing...")
+                    self.adb.tap(connected_device[0], connected_device[1])
+                    time.sleep(RESTART_GAME_WAIT)
+                    self._trophy_miss_count = 0
+                    self._anchor_miss_streak = 0
+                    return
 
             # Search for btn_close on every miss, not just every 6th — if the forge
             # icon is missing because a popup/shop leftover is covering the screen
@@ -391,7 +402,8 @@ class RR2Bot:
             return None
         if (self.vision.find_template(screen, "icon_forge", threshold=0.90)
                 or self.vision.find_template(screen, "btn_take_a_break", threshold=0.85)
-                or self.vision.find_template(screen, "btn_king_claim", threshold=0.85)):
+                or self.vision.find_template(screen, "btn_king_claim", threshold=0.85)
+                or self.vision.find_template(screen, "btn_connected_device", threshold=0.85)):
             return State.HOME
         if self.vision.find_template(screen, "btn_start_search", threshold=0.80):
             return State.TROPHY_MENU
