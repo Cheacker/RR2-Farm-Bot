@@ -32,7 +32,9 @@ SESSIONS = {
     "22": ("Video Button(After After Clicking attack, insufficient breads)", ["btn_video"]),
     "23": ("Shop food icon",                                         ["btn_food"]),
     "24": ("League collect button (home screen)",                    ["btn_collect_league"]),
-    "25": ("GRAY attack button (unattackable opponent, pre-match screen)", ["btn_attack_start_gray"])
+    "25": ("GRAY attack button (unattackable opponent, pre-match screen)", ["btn_attack_start_gray"]),
+    "26": ("'Take a break' reminder popup button (usually home screen)", ["btn_take_a_break"]),
+    "27": ("'I am the King' claim popup button (home screen)", ["btn_king_claim"])
 
 }
 

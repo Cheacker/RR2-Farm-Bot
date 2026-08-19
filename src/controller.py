@@ -152,7 +152,7 @@ class ADBController:
             print(f"[ADB] resolve-activity failed: {e}")
         return None
 
-    def restart_game(self, package: str):
+    def restart_game(self, package: str, wait: int = 13):
         if not self.device:
             return
         print(f"[ADB] Stopping game: {package}")
@@ -165,7 +165,7 @@ class ADBController:
         else:
             print(f"[ADB] Could not resolve launcher activity, falling back to monkey: {package}")
             self.device.shell(f"monkey -p {package} -c android.intent.category.LAUNCHER 1")
-        time.sleep(13)
+        time.sleep(wait)
 
 
 if __name__ == "__main__":
