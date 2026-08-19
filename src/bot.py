@@ -152,6 +152,7 @@ class RR2Bot:
         self._trophy_miss_count = 0
         self._trophy_menu_miss  = 0
         self._in_game_start     = 0
+        self._last_in_game_find_state = 0
         self._trophy_filter     = trophy_filter
         self._melt_threshold    = melt_threshold
         self._drop_trophies     = drop_trophies
@@ -797,6 +798,7 @@ class RR2Bot:
             time.sleep(0.1)
             self.adb.tap(*SECOND_TROOP_SLOT_COORDS)
             self._in_game_start = time.time()
+            self._last_in_game_find_state = time.time()
             time.sleep(0.3)
             self.adb.tap(*SECOND_TROOP_SLOT_COORDS)
             self.adb.tap(*ARCHER_COORDS)
@@ -849,6 +851,16 @@ class RR2Bot:
             self.state = State.HOME
             time.sleep(0.5)
             return
+
+        if (screen is not None and self._in_game_start > 0
+                and now - self._last_in_game_find_state >= 45):
+            self._last_in_game_find_state = now
+            detected = self._find_state(screen)
+            if detected is not None and detected != State.IN_GAME:
+                print(f"[IN_GAME] find_state detected '{detected}' instead of gameplay — resyncing")
+                self._in_game_start = 0
+                self.state = detected
+                return
 
         if self._in_game_start > 0 and now - self._in_game_start > self._in_game_timeout:
             print(f"[IN_GAME] {self._in_game_timeout}s timeout — restarting game...")
