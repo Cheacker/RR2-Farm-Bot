@@ -349,15 +349,6 @@ class RR2Bot:
                     self._anchor_miss_streak = 0
                     return
 
-                connected_device = self.vision.find_template(screen, "btn_connected_device", threshold=0.85)
-                if connected_device:
-                    print("[HOME] 'Connected another device' popup detected — dismissing...")
-                    self.adb.tap(connected_device[0], connected_device[1])
-                    time.sleep(RESTART_GAME_WAIT)
-                    self._trophy_miss_count = 0
-                    self._anchor_miss_streak = 0
-                    return
-
             # Search for btn_close on every miss, not just every 6th — if the forge
             # icon is missing because a popup/shop leftover is covering the screen
             # (e.g. after the GAME_LOAD food-purchase flow didn't fully close out),
@@ -402,8 +393,7 @@ class RR2Bot:
             return None
         if (self.vision.find_template(screen, "icon_forge", threshold=0.90)
                 or self.vision.find_template(screen, "btn_take_a_break", threshold=0.85)
-                or self.vision.find_template(screen, "btn_king_claim", threshold=0.85)
-                or self.vision.find_template(screen, "btn_connected_device", threshold=0.85)):
+                or self.vision.find_template(screen, "btn_king_claim", threshold=0.85)):
             return State.HOME
         if self.vision.find_template(screen, "btn_start_search", threshold=0.80):
             return State.TROPHY_MENU
@@ -412,7 +402,7 @@ class RR2Bot:
         if self._on_attack_prep_screen(screen):
             return State.ATTACK_PREP
         if (self.vision.find_template(screen, "btn_archer", threshold=0.85)
-                or self.vision.find_template(screen, "btn_bring_me_back", threshold=0.85)):
+                or self.vision.find_template(screen, "btn_take_me_back", threshold=0.85)):
             return State.GAME_LOAD
         if (self.vision.find_template(screen, "btn_give_up", threshold=0.70)
                 or self.vision.find_template(screen, "btn_sell", threshold=0.70)
@@ -783,7 +773,7 @@ class RR2Bot:
             print("[GAME_LOAD] Shop/video popup still visible after close attempt — retrying via miss counter.")
             # Fall through to the miss counter below instead of returning — the existing
             # 15-miss restart-game safety net will recover if this keeps failing.
-        go_back = self.vision.find_template(screen, "btn_bring_me_back", threshold=0.9)
+        go_back = self.vision.find_template(screen, "btn_take_me_back", threshold=0.9)
         if go_back:
             self._game_load_miss = 0
             self._anchor_miss_streak = 0

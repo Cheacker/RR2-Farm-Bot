@@ -22,7 +22,7 @@ SESSIONS = {
     "7":  ("Give up button",                             ["btn_give_up"]),
     "8-13": ("Chests (6 separate crops)",                 ["chest_1","chest_2","chest_3","chest_4","chest_5","chest_6"]),
     "14": ("Archer button (appears when match starts)",     ["btn_archer"]),
-    "15": ("Bring me back button (active player warning)",  ["btn_bring_me_back"]),
+    "15": ("Take me back button (active player warning)",  ["btn_take_me_back"]),
     "16": ("Green back button",                             ["btn_green_back"]),
     "17": ("Collect button (appears on home screen for vouchers)",      ["btn_collect"]),
     "18": ("Big collect button (appears after attack prep for breads)",     ["btn_big_collect"]),
@@ -34,8 +34,7 @@ SESSIONS = {
     "24": ("League collect button (home screen)",                    ["btn_collect_league"]),
     "25": ("GRAY attack button (unattackable opponent, pre-match screen)", ["btn_attack_start_gray"]),
     "26": ("'Take a break' reminder popup button (usually home screen)", ["btn_take_a_break"]),
-    "27": ("'I am the King' claim popup button (home screen)", ["btn_king_claim"]),
-    "28": ("'Connected another device' popup button (home screen)", ["btn_connected_device"])
+    "27": ("'I am the King' claim popup button (home screen)", ["btn_king_claim"])
 
 }
 
