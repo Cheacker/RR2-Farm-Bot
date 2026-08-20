@@ -53,9 +53,16 @@ adb version
 ```
 If that works, skip to Step 3.
 
-If you get `'adb' is not recognized`, either:
-- Add LDPlayer's install folder to your `PATH` (it bundles `adb.exe`, `ldconsole.exe`, etc. — see [Finding your LDPlayer install path](#finding-your-ldplayer-install-path) below), **or**
-- Install [Android Platform Tools](https://developer.android.com/studio/releases/platform-tools) and add the extracted folder to your `PATH`.
+If you get `'adb' is not recognized`, add LDPlayer's install folder to your `PATH` — it already bundles both `adb.exe` and `ldconsole.exe`, so this one folder covers both.
+
+**What exact folder to add:** the one that directly contains `ldconsole.exe` and `adb.exe` — for example `D:\Program Files\LDPlayer\LDPlayer9`, **not** a parent folder like `D:\Program Files\LDPlayer` and **not** a subfolder. The easiest way to find it:
+1. Install [Everything](https://www.voidtools.com/) (a free, instant file search tool for Windows).
+2. Search `ldconsole.exe`.
+3. Right-click the result → **Copy path**, then delete `\ldconsole.exe` off the end — what's left is the folder to add to `PATH`.
+4. Add it: Windows search → **Edit the system environment variables** → **Environment Variables** → under **User variables**, select `Path` → **Edit** → **New** → paste the folder → **OK** everywhere.
+5. Open a **new** terminal window (existing ones won't see the change) and confirm with `adb version`.
+
+Alternatively, install [Android Platform Tools](https://developer.android.com/studio/releases/platform-tools) and add the extracted folder to your `PATH` instead — but if LDPlayer is already installed, using its bundled `adb.exe` is simpler since it's one less thing to install.
 
 ### Step 3 — Install Python packages
 
@@ -79,7 +86,7 @@ This installs `adbutils` (talks to the emulator over ADB), `opencv-python` (temp
 2. Start an instance and install Royal Revolt 2 inside it (from the Play Store, or however you normally would).
 3. **Set the Android language to English.** The bot's reference images were captured with an English UI — a different language means most buttons won't be recognized at all.
    - Inside the emulator: **Settings** (gear icon) → search **Languages & input** → make **English** the primary language → restart the emulator so Royal Revolt 2 picks it up.
-4. **Do not manually change the emulator resolution.** The bot forces it to `1600x900` itself on every start (via `wm size`) to match the reference images — you don't need to set this yourself, and fighting it by setting a different resolution in LDPlayer's own display settings isn't necessary.
+4. **Set the emulator's resolution to `1600x900`.** All the reference images and coordinates in this project were captured at that resolution. In LDPlayer, go to the instance's settings (wrench/gear icon on the instance's toolbar) → **Display** → set **Resolution** to a custom `1600x900`, then restart the instance. The bot also forces this itself via `wm size` on every start as a backup, but starting from the right resolution avoids a mismatch window right after boot — set it yourself rather than relying only on the bot to fix it.
 
 ### Step 6 — One-time in-game setup
 
@@ -100,17 +107,27 @@ If you're running multiple LDPlayer instances, or want to confirm the port:
 
 ## Finding your LDPlayer install path
 
-The bot needs `ldconsole.exe` (LDPlayer's command-line control tool) to restart the emulator when needed. It auto-detects this under common install locations (`C:\LDPlayer\...`, `D:\LDPlayer\...`, `C:\Program Files\LDPlayer\...`, etc. — any drive, any version folder). If your install is somewhere unusual, pass its path with `--ldconsole` (see below) — you'll get a clear `[WARN]` at startup if it couldn't be found.
+The bot needs `ldconsole.exe` (LDPlayer's command-line control tool) to check whether the instance is running and launch/restart it when needed. It auto-detects this under common install locations (`C:\LDPlayer\...`, `D:\LDPlayer\...`, `C:\Program Files\LDPlayer\...`, etc. — any drive, any version folder). If your install is somewhere unusual, pass its full path with `--ldconsole`.
+
+Fastest way to get that path: install [Everything](https://www.voidtools.com/) (see [Step 2](#step-2--make-sure-adb-is-available) above), search `ldconsole.exe`, right-click the result → **Copy path**. Paste it straight into the `--ldconsole` argument, quoted:
+```
+python src\bot.py --ldconsole "D:\Program Files\LDPlayer\LDPlayer9\ldconsole.exe"
+```
 
 ---
 
 ## Running the bot
 
+If your terminal's current folder is already the repo root:
 ```
 python src\bot.py
 ```
-
 That's the whole command for a typical single-instance setup — port `5555`, trophy filter `600`, melt threshold `1,000,000` gold, drop-trophies off.
+
+If you're running it from somewhere else (a shortcut, a scheduled task, a different terminal folder), use the full path to `bot.py` instead. The easiest way to get it right: in File Explorer, open the `src` folder inside wherever you extracted/cloned the repo, hold **Shift** and right-click an empty spot → **Copy as path** (or right-click `bot.py` itself → **Copy as path** on newer Windows). Paste that after `python`, for example:
+```
+python "C:\Users\you\Documents\RR2-Farm-Bot\src\bot.py" --port 5554 --gold 100000
+```
 
 ### Parameters
 
@@ -130,6 +147,7 @@ python src\bot.py --trophy-filter 900
 python src\bot.py --gold 20000000
 python src\bot.py --port 5557 --ld-index 1
 python src\bot.py --drop-trophies drop_yes
+python "C:\Users\you\Documents\RR2-Farm-Bot\src\bot.py" --port 5554 --gold 100000
 ```
 
 Stop the bot any time with **Ctrl+C**. If it stops for any reason (crash, manual stop, power loss), just run the same command again — it restarts the game and continues from the beginning of the loop. Progress (which players are marked active/unattackable) is saved in `player_data.json` and survives restarts.
@@ -192,13 +210,30 @@ Drop-trophies mode needs four coordinates specific to your setup, defined near t
 
 If any of these are unset, the bot prints a `[WARN]` at startup and falls back to a plain timeout-based drop instead.
 
-### "No ADB devices found"
+### "No ADB devices found" / `adb devices` shows an empty list
 
-Is the LDPlayer instance actually running? Run `adb devices` — it should be listed. If it isn't, start the instance manually once, wait for it to fully boot, then run the bot again.
+Try these in order:
+
+1. **Is LDPlayer actually open?** Check the taskbar/Task Manager. If not, start the instance manually and wait for it to fully boot to the home screen before running the bot — the bot itself will also try to launch it via `ldconsole` if `--ldconsole`/auto-detection found it, but a fully-booted instance you started yourself is the most reliable baseline.
+2. **Check what port it's actually on.** Run `adb devices` while the instance is running. LDPlayer's first instance is normally `5555`, but it can occasionally come up one port off (`5554`) depending on what else is using ports on your machine. Pass whatever port shows up with `--port`. The bot itself also tries the configured port's immediate neighbor automatically, so a one-off drift like this usually resolves on its own — but if `adb devices` shows nothing at all, that auto-detection has nothing to find either.
+3. **Restart just the ADB server** (not LDPlayer) — this fixes a surprising number of "everything looks fine but nothing connects" cases:
+   ```
+   adb kill-server
+   adb start-server
+   adb connect 127.0.0.1:5555
+   adb devices
+   ```
+   If a device now shows up, the bot should connect normally on the next run.
+4. **Fully restart LDPlayer** if the above doesn't help — close the instance completely (not just the window) via LDPlayer's own manager, then reopen it and repeat step 3.
+5. Still stuck? See [Troubleshooting with an AI assistant](#troubleshooting-with-an-ai-assistant) below — paste the exact console output and it can usually narrow this down faster than guessing from a static list.
 
 ### `ModuleNotFoundError` / `tesseract is not installed`
 
 Re-check [Step 3](#step-3--install-python-packages) and [Step 4](#step-4--install-tesseract-ocr) above.
+
+### Troubleshooting with an AI assistant
+
+For anything not covered above — an unfamiliar error, a stack trace, the bot doing something unexpected — paste the console output (and the relevant file, e.g. `src/bot.py` or `src/controller.py`) into an AI assistant like Claude or ChatGPT and ask it to explain what's happening and suggest a fix. The whole project is open source and simple enough (a template-matching state machine, not a black box) that an AI reading the actual code and your actual error message will usually get you further than a fixed FAQ can. This is also a good way to double-check the code isn't doing anything sketchy before you run it — see [Verifying the code yourself](#verifying-the-code-yourself) below.
 
 ---
 
