@@ -164,6 +164,7 @@ class RR2Bot:
         self._game_load_miss    = 0
         self._screen_none_count = 0
         self._adb_timeout_count = 0
+        self._restart_failures  = 0
         self._anchor_miss_streak = 0
         self._capture_inactives  = capture_inactives
         self._capture_wait_start = 0
@@ -192,12 +193,31 @@ class RR2Bot:
         while time.time() < deadline:
             self.adb._connect()
             if self.adb.device:
-                print("[EMULATOR] Instance is ready.")
-                self.adb.ensure_resolution(1600, 900)
                 break
             time.sleep(3)
-        else:
-            print("[EMULATOR] Timeout — instance did not start within 90s.")
+
+        if not self.adb.device:
+            # Plain 'adb connect' polling never recovered a device — the adb server
+            # itself may be wedged, which only a kill-server/start-server actually
+            # fixes. Try that once before giving up on this restart attempt.
+            print("[EMULATOR] Instance still not visible to ADB — trying a full adb server reset...")
+            self.adb._reconnect()
+
+        if not self.adb.device:
+            self._restart_failures += 1
+            # Back off instead of hammering another quit/launch cycle immediately —
+            # this used to loop 'Restart complete' every ~10s forever when the
+            # instance genuinely couldn't come up, without ever slowing down or
+            # escalating.
+            backoff = min(30 * self._restart_failures, 300)
+            print(f"[EMULATOR] Restart FAILED ({self._restart_failures} in a row) — instance did not "
+                  f"become visible to ADB. Waiting {backoff}s before the next attempt...")
+            time.sleep(backoff)
+            return
+
+        print("[EMULATOR] Instance is ready.")
+        self.adb.ensure_resolution(1600, 900)
+        self._restart_failures = 0
         self.db.set_last_emulator_restart()
         self.adb.restart_game(RR2_PACKAGE, wait=RESTART_GAME_WAIT)
         self.state = State.HOME
@@ -827,10 +847,13 @@ class RR2Bot:
             print("[GAME_LOAD] Archer button visible, match started!")
             self._skip_top = 0
             self.adb.tap(*ARCHER_COORDS)
+            self.adb.tap(953, 566)
             time.sleep(0.1)
             self.adb.tap(*SECOND_TROOP_SLOT_COORDS)
+            self.adb.tap(953, 566)
             time.sleep(0.1)
             self.adb.tap(*SECOND_TROOP_SLOT_COORDS)
+            self.adb.tap(953, 566)
             self._in_game_start = time.time()
             self._last_in_game_find_state = time.time()
             time.sleep(0.3)
