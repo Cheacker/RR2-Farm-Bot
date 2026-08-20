@@ -14,42 +14,78 @@ class ADBController:
         self.last_capture_error = None
         self._connect()
 
-    def _connect(self):
-        print(f"Connecting to emulator on port {self._port}...")
+    def _candidate_ports(self):
+        """LDPlayer doesn't always bind adb on the expected port — it can end up one
+        off (e.g. 5555 configured, instance actually comes up on 5554) depending on
+        what else grabbed ports first. Scan the configured port and its neighbor
+        instead of assuming the configured one is always right."""
+        port = self._port
+        candidates = [port]
+        for alt in (port - 1, port + 1):
+            if alt not in candidates and alt > 0:
+                candidates.append(alt)
+        return candidates
+
+    def _adb_server_reset(self):
+        print("[ADB] Resetting adb server (kill-server/start-server)...")
         try:
-            subprocess.run(
-                ["adb", "connect", f"127.0.0.1:{self._port}"],
-                capture_output=True, timeout=10
-            )
+            subprocess.run(["adb", "kill-server"], timeout=5, capture_output=True)
+            time.sleep(1)
+            subprocess.run(["adb", "start-server"], timeout=10, capture_output=True)
             time.sleep(1)
         except Exception as e:
-            print(f"[ADB] adb connect failed: {e}")
+            print(f"[ADB] Server reset failed: {e}")
+
+    def _connect(self, _retry_after_reset=True):
+        candidates = self._candidate_ports()
+        for candidate in candidates:
+            print(f"Connecting to emulator on port {candidate}...")
+            try:
+                subprocess.run(
+                    ["adb", "connect", f"127.0.0.1:{candidate}"],
+                    capture_output=True, timeout=10
+                )
+            except Exception as e:
+                print(f"[ADB] adb connect failed: {e}")
+        time.sleep(1)
 
         try:
             self.adb = adbutils.AdbClient(host="127.0.0.1", port=5037)
             if self._serial:
                 self.device = self.adb.device(self._serial)
+                return
+            devices = self.adb.device_list()
+            if not devices:
+                print("No ADB devices found. Make sure the emulator is running.")
+                self.device = None
+                if _retry_after_reset:
+                    # A plain 'adb connect' can fail to register anything if the adb
+                    # server itself is wedged from a previous crash — a full reset
+                    # often recovers it even when the instance was fine the whole time.
+                    self._adb_server_reset()
+                    self._connect(_retry_after_reset=False)
+                return
+
+            # Multiple emulators can be registered with adb at once (e.g. another
+            # emulator left running alongside LDPlayer) — devices[0] would silently
+            # pick whichever adb happens to list first, not the one we asked to
+            # connect to. Match one of the candidate ports' serials explicitly.
+            candidate_serials = [f"127.0.0.1:{p}" for p in candidates]
+            match = next((d for d in devices if d.serial in candidate_serials), None)
+            if match:
+                if match.serial != f"127.0.0.1:{self._port}":
+                    matched_port = int(match.serial.rsplit(":", 1)[1])
+                    print(f"[ADB] Instance is on port {matched_port}, not the configured "
+                          f"{self._port} — using {matched_port} going forward.")
+                    self._port = matched_port
+                self.device = match
             else:
-                devices = self.adb.device_list()
-                if not devices:
-                    print("No ADB devices found. Make sure the emulator is running.")
-                    self.device = None
-                else:
-                    # Multiple emulators can be registered with adb at once (e.g. MEmu
-                    # left running alongside LDPlayer) — devices[0] would silently pick
-                    # whichever adb happens to list first, not the one we asked to connect
-                    # to. Match the requested port's serial explicitly when possible.
-                    target_serial = f"127.0.0.1:{self._port}"
-                    match = next((d for d in devices if d.serial == target_serial), None)
-                    if match:
-                        self.device = match
-                    else:
-                        self.device = devices[0]
-                        if len(devices) > 1:
-                            print(f"[ADB] WARNING: {len(devices)} devices registered, none match "
-                                  f"{target_serial} — falling back to {self.device.serial}. "
-                                  f"Close unused emulators to avoid controlling the wrong one.")
-                    print(f"Connected to device: {self.device.serial}")
+                self.device = devices[0]
+                if len(devices) > 1:
+                    print(f"[ADB] WARNING: {len(devices)} devices registered, none match "
+                          f"{candidate_serials} — falling back to {self.device.serial}. "
+                          f"Close unused emulators to avoid controlling the wrong one.")
+            print(f"Connected to device: {self.device.serial}")
         except Exception as e:
             print(f"Connection failed: {e}")
             self.device = None
@@ -74,16 +110,10 @@ class ADBController:
 
     def _reconnect(self):
         print("[ADB] Connection lost — kill-server/start-server...")
-        try:
-            subprocess.run(["adb", "kill-server"], timeout=5, capture_output=True)
-            time.sleep(1)
-            subprocess.run(["adb", "start-server"], timeout=10, capture_output=True)
-            time.sleep(1)
-        except Exception as e:
-            print(f"[ADB] Server restart failed: {e}")
+        self._adb_server_reset()
         try:
             self.adb = adbutils.AdbClient(host="127.0.0.1", port=5037)
-            self._connect()
+            self._connect(_retry_after_reset=False)
         except Exception as e:
             print(f"[ADB] Reconnect failed: {e}")
 
