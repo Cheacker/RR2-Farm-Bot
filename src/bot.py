@@ -102,14 +102,21 @@ class RR2Bot:
             subprocess.Popen([self._ldconsole, "launch", "--index", str(self._ld_index)])
             self._emulator_just_launched = True
             print("[EMULATOR] Waiting for the instance to boot...")
-            time.sleep(15)
-            self.adb._reconnect()
+            # No fixed sleep-then-reset here: guessing a boot time that fits every
+            # machine is a losing game, and resetting the adb server exactly while
+            # LDPlayer is mid-handshake can itself break the connection (that's what
+            # was happening before). Just poll from early on for up to 90s, and only
+            # escalate to a full adb server reset if plain polling never finds it.
+            time.sleep(5)
             deadline = time.time() + 90
             while time.time() < deadline:
+                self.adb._connect()
                 if self.adb.device:
                     break
-                self.adb._connect()
                 time.sleep(3)
+            if not self.adb.device:
+                print("[EMULATOR] Instance still not visible to ADB — trying a full adb server reset...")
+                self.adb._reconnect()
         elif not self.adb.device:
             print("[EMULATOR] No ADB device, and ldconsole.exe could not be auto-detected — "
                   "start the LDPlayer instance manually, or pass its path with --ldconsole.")
@@ -188,7 +195,7 @@ class RR2Bot:
         subprocess.Popen([self._ldconsole, "launch", "--index", str(self._ld_index)])
         self.db.set_last_emulator_restart()
         print("[EMULATOR] Waiting for ADB to be ready...")
-        time.sleep(15)
+        time.sleep(25)
         deadline = time.time() + 75
         while time.time() < deadline:
             self.adb._connect()
