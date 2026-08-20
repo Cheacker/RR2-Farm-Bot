@@ -26,22 +26,11 @@ class ADBController:
                 candidates.append(alt)
         return candidates
 
-    def _adb_server_reset(self):
-        print("[ADB] Resetting adb server (kill-server/start-server)...")
-        try:
-            subprocess.run(["adb", "kill-server"], timeout=5, capture_output=True)
-            time.sleep(1)
-            subprocess.run(["adb", "start-server"], timeout=10, capture_output=True)
-            time.sleep(1)
-        except Exception as e:
-            print(f"[ADB] Server reset failed: {e}")
-
     def _connect(self):
-        # No automatic server reset in here: this gets polled every few seconds
-        # while an emulator is booting (__init__, _restart_emulator), and a
-        # kill-server/start-server mid-boot can itself prevent LDPlayer from ever
-        # attaching to adb. Resetting the server is a deliberate action a caller
-        # takes once via _reconnect(), never something _connect() decides on its own.
+        # Deliberately no adb kill-server/start-server anywhere in this class. This
+        # gets polled every few seconds while an emulator is booting, and resetting
+        # the adb server mid-boot was actively breaking connections that would have
+        # come up fine on their own -- plain 'adb connect' polling is enough.
         candidates = self._candidate_ports()
         for candidate in candidates:
             print(f"Connecting to emulator on port {candidate}...")
@@ -106,15 +95,6 @@ class ADBController:
             print(f"[ADB] Resolution now: {out2}")
         except Exception as e:
             print(f"[ADB] Failed to set resolution: {e}")
-
-    def _reconnect(self):
-        print("[ADB] Connection lost — kill-server/start-server...")
-        self._adb_server_reset()
-        try:
-            self.adb = adbutils.AdbClient(host="127.0.0.1", port=5037)
-            self._connect()
-        except Exception as e:
-            print(f"[ADB] Reconnect failed: {e}")
 
     def current_screen(self, retries=4):
         if not self.device:

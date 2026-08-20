@@ -16,9 +16,9 @@ CAPTURED_INACTIVES_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.ab
 os.makedirs(CAPTURED_INACTIVES_DIR, exist_ok=True)
 
 RR2_PACKAGE            = "com.flaregames.rrtournament"
-EMULATOR_RESTART_INTERVAL = 3 * 3600  # restart the emulator every 3 hours
 RESTART_GAME_WAIT      = 13  # seconds to wait after restart_game()/a HOME popup dismissal
                               # for the game to settle back onto a stable screen
+CONNECT_POLL_TIMEOUT   = 60  # seconds to poll 'adb connect' before concluding LDPlayer needs a restart
 
 # ldconsole.exe lives inside the versioned LDPlayer install folder (LDPlayer9,
 # LDPlayer14, ...) which differs per machine/drive — glob instead of hardcoding.
@@ -90,42 +90,9 @@ class RR2Bot:
         self.adb = ADBController(port=port)
         self._ld_index = ld_index
         self._ldconsole = ldconsole or find_ldconsole()
-        self._emulator_just_launched = False
-        if self._ldconsole:
-            # Always force a clean LDPlayer restart on startup, even if ADB already
-            # sees a device -- the instance itself can end up in a wedged state
-            # (rendering stalls, input stops registering, etc.) that a healthy-looking
-            # ADB connection doesn't reveal. A cold restart is the reliable baseline.
-            print(f"[EMULATOR] Restarting LDPlayer instance --index {self._ld_index} for a clean start...")
-            subprocess.run([self._ldconsole, "quit", "--index", str(self._ld_index)], capture_output=True)
-            time.sleep(1)
-            subprocess.Popen([self._ldconsole, "launch", "--index", str(self._ld_index)])
-            self._emulator_just_launched = True
-            print("[EMULATOR] Waiting for the instance to boot...")
-            # No fixed sleep-then-reset here: guessing a boot time that fits every
-            # machine is a losing game, and resetting the adb server exactly while
-            # LDPlayer is mid-handshake can itself break the connection (that's what
-            # was happening before). Just poll from early on for up to 90s, and only
-            # escalate to a full adb server reset if plain polling never finds it.
-            time.sleep(5)
-            deadline = time.time() + 90
-            while time.time() < deadline:
-                self.adb._connect()
-                if self.adb.device:
-                    break
-                time.sleep(3)
-            if not self.adb.device:
-                print("[EMULATOR] Instance still not visible to ADB — trying a full adb server reset...")
-                self.adb._reconnect()
-        elif not self.adb.device:
-            print("[EMULATOR] No ADB device, and ldconsole.exe could not be auto-detected — "
-                  "start the LDPlayer instance manually, or pass its path with --ldconsole.")
-            exit(1)
-        else:
-            print("[EMULATOR] ldconsole.exe not found — using the already-connected device "
-                  "as-is instead of forcing a restart. Pass --ldconsole to enable that.")
+        self._ensure_emulator_connected()
         if not self.adb.device:
-            print("ADB connection failed.")
+            print("ADB connection failed. Start LDPlayer manually and re-run.")
             exit(1)
         self.adb.ensure_resolution(1600, 900)
         self.vision = VisionInterpreter(template_dir=template_dir)
@@ -170,8 +137,6 @@ class RR2Bot:
         self._pearl_last        = None
         self._game_load_miss    = 0
         self._screen_none_count = 0
-        self._adb_timeout_count = 0
-        self._restart_failures  = 0
         self._anchor_miss_streak = 0
         self._capture_inactives  = capture_inactives
         self._capture_wait_start = 0
@@ -179,56 +144,63 @@ class RR2Bot:
         self._scroll_attempts    = 0
         self.db = PlayerDB()
 
-
-    # ── Emulator restart ──────────────────────────────────────────────────────
-    def _restart_emulator(self):
+    # ── Emulator connection ───────────────────────────────────────────────────
+    def _ldplayer_running(self):
+        """Ask ldconsole itself whether the instance is up — the equivalent of
+        checking Task Manager, without guessing at process names."""
         if not self._ldconsole:
-            print("[EMULATOR] ldconsole.exe unknown — cannot restart the instance, "
-                  "skipping (pass --ldconsole to enable this). Restarting the game only.")
-            self.adb.restart_game(RR2_PACKAGE, wait=RESTART_GAME_WAIT)
-            self.state = State.HOME
+            return False
+        try:
+            out = subprocess.run(
+                [self._ldconsole, "isrunning", "--index", str(self._ld_index)],
+                capture_output=True, text=True, timeout=10
+            )
+            return "running" in out.stdout.strip().lower()
+        except Exception as e:
+            print(f"[EMULATOR] isrunning check failed: {e}")
+            return False
+
+    def _ensure_emulator_connected(self):
+        """Simple, non-destructive connection sequence: if already connected, do
+        nothing. Otherwise check whether LDPlayer is actually open (like glancing
+        at Task Manager) and launch it if not, then just poll 'adb connect' for a
+        while. Only if that genuinely never works do we close and reopen the
+        instance once. No adb kill-server/start-server anywhere in here — that
+        was the thing repeatedly breaking an otherwise-fine connection."""
+        if self.adb.device:
             return
-        print(f"[EMULATOR] Closing instance --index {self._ld_index}...")
-        subprocess.run([self._ldconsole, "quit", "--index", str(self._ld_index)], capture_output=True)
-        time.sleep(3)
-        print(f"[EMULATOR] Launching instance --index {self._ld_index}...")
-        subprocess.Popen([self._ldconsole, "launch", "--index", str(self._ld_index)])
-        self.db.set_last_emulator_restart()
-        print("[EMULATOR] Waiting for ADB to be ready...")
-        time.sleep(25)
-        deadline = time.time() + 75
+        if not self._ldconsole:
+            print("[EMULATOR] ldconsole.exe not found — can't check or launch LDPlayer "
+                  "automatically. Start it manually, or pass --ldconsole.")
+            return
+
+        if self._ldplayer_running():
+            print(f"[EMULATOR] LDPlayer instance --index {self._ld_index} is already open — "
+                  f"trying to connect...")
+        else:
+            print(f"[EMULATOR] LDPlayer instance --index {self._ld_index} is not open — launching...")
+            subprocess.Popen([self._ldconsole, "launch", "--index", str(self._ld_index)])
+
+        deadline = time.time() + CONNECT_POLL_TIMEOUT
         while time.time() < deadline:
             self.adb._connect()
             if self.adb.device:
-                break
+                return
             time.sleep(3)
 
-        if not self.adb.device:
-            # Plain 'adb connect' polling never recovered a device — the adb server
-            # itself may be wedged, which only a kill-server/start-server actually
-            # fixes. Try that once before giving up on this restart attempt.
-            print("[EMULATOR] Instance still not visible to ADB — trying a full adb server reset...")
-            self.adb._reconnect()
+        print(f"[EMULATOR] Still not connected after {CONNECT_POLL_TIMEOUT}s — "
+              f"closing and reopening the instance...")
+        subprocess.run([self._ldconsole, "quit", "--index", str(self._ld_index)], capture_output=True)
+        time.sleep(3)
+        subprocess.Popen([self._ldconsole, "launch", "--index", str(self._ld_index)])
 
-        if not self.adb.device:
-            self._restart_failures += 1
-            # Back off instead of hammering another quit/launch cycle immediately —
-            # this used to loop 'Restart complete' every ~10s forever when the
-            # instance genuinely couldn't come up, without ever slowing down or
-            # escalating.
-            backoff = min(30 * self._restart_failures, 300)
-            print(f"[EMULATOR] Restart FAILED ({self._restart_failures} in a row) — instance did not "
-                  f"become visible to ADB. Waiting {backoff}s before the next attempt...")
-            time.sleep(backoff)
-            return
-
-        print("[EMULATOR] Instance is ready.")
-        self.adb.ensure_resolution(1600, 900)
-        self._restart_failures = 0
-        self.db.set_last_emulator_restart()
-        self.adb.restart_game(RR2_PACKAGE, wait=RESTART_GAME_WAIT)
-        self.state = State.HOME
-        print("[EMULATOR] Restart complete.")
+        deadline = time.time() + 90
+        while time.time() < deadline:
+            self.adb._connect()
+            if self.adb.device:
+                return
+            time.sleep(3)
+        print("[EMULATOR] Instance still not visible to ADB after a restart. Giving up.")
 
     # ── Shutdown helper ───────────────────────────────────────────────────────
     def _shutdown(self, reason: str):
@@ -244,59 +216,30 @@ class RR2Bot:
     # ── Main loop ─────────────────────────────────────────────────────────────
     def loop(self):
         print("Bot started! Press Ctrl+C to stop.")
-        last_restart = self.db.get_last_emulator_restart()
-        if self._emulator_just_launched:
-            # Instance was just launched in __init__ — treat as fresh restart, don't close again
-            self.db.set_last_emulator_restart()
-            self.adb.restart_game(RR2_PACKAGE, wait=RESTART_GAME_WAIT)
-        elif last_restart is None:
-            self.db.set_last_emulator_restart()
-            self.adb.restart_game(RR2_PACKAGE, wait=RESTART_GAME_WAIT)
-        elif time.time() - last_restart >= EMULATOR_RESTART_INTERVAL:
-            self._restart_emulator()
-        else:
-            self.adb.restart_game(RR2_PACKAGE, wait=RESTART_GAME_WAIT)
+        self.adb.restart_game(RR2_PACKAGE, wait=RESTART_GAME_WAIT)
         while self.running:
             try:
-                # Runs every iteration regardless of state — previously gated behind
-                # State.HOME, so a session stuck anywhere else (e.g. spinning in
-                # TROPHY_MENU) never reached this check and the safety-net restart
-                # that's supposed to catch a broken/hung emulator never fired.
-                last_restart = self.db.get_last_emulator_restart() or self._start_time
-                if time.time() - last_restart >= EMULATOR_RESTART_INTERVAL:
-                    self._restart_emulator()
-                    continue
-
                 screen = self.adb.current_screen()
                 if screen is None:
                     self._screen_none_count += 1
-                    # An actual "adb read timeout" (vs. a blank/undecodable frame) means the
-                    # ADB socket itself is wedged, not just a slow frame — waiting for the
-                    # generic 100-miss counter could take many minutes since each timed-out
-                    # current_screen() call already burns up to retries*15s on its own.
-                    # Restart LDPlayer immediately after a couple of these instead.
-                    error = (self.adb.last_capture_error or "").lower()
-                    if "timeout" in error:
-                        self._adb_timeout_count += 1
-                        print(f"[LOOP] ADB read timeout ({self._adb_timeout_count}/2): {error}")
-                        if self._adb_timeout_count >= 2:
-                            print("[LOOP] Repeated ADB read timeouts — restarting LDPlayer...")
-                            self._adb_timeout_count = 0
-                            self._screen_none_count = 0
-                            self._restart_emulator()
-                            continue
-                    else:
-                        self._adb_timeout_count = 0
-                    if self._screen_none_count >= 100:
+                    if self._screen_none_count >= 20:
                         print(f"[LOOP] No screen for {self._screen_none_count} attempts — "
-                              f"emulator likely hung or disconnected, restarting it...")
+                              f"connection appears lost, running recovery...")
                         self._screen_none_count = 0
-                        self._restart_emulator()
+                        self.adb.device = None
+                        self._ensure_emulator_connected()
+                        if not self.adb.device:
+                            print("[LOOP] Could not recover the ADB connection. Stopping — "
+                                  "restart LDPlayer and re-run the bot.")
+                            self._shutdown("adb_connection_lost")
+                            break
+                        self.adb.ensure_resolution(1600, 900)
+                        self.adb.restart_game(RR2_PACKAGE, wait=RESTART_GAME_WAIT)
+                        self.state = State.HOME
                         continue
                     time.sleep(0.1)
                     continue
                 self._screen_none_count = 0
-                self._adb_timeout_count = 0
 
                 if   self.state == State.HOME:               self.handle_home(screen)
                 elif self.state == State.TROPHY_MENU:        self.handle_trophy_menu(screen)
@@ -1093,7 +1036,8 @@ if __name__ == "__main__":
                         help="ADB port of the LDPlayer instance (default: 5555, the first instance). "
                              "Run 'adb devices' while the instance is running to confirm it.")
     parser.add_argument("--ld-index", type=int, default=0,
-                        help="LDPlayer instance index, used for auto-restart via ldconsole (default: 0, the first instance)")
+                        help="LDPlayer instance index, used to check/launch/restart it via "
+                             "ldconsole (default: 0, the first instance)")
     parser.add_argument("--ldconsole", type=str, default=None,
                         help="Path to ldconsole.exe. Auto-detected under common LDPlayer install "
                              "locations if omitted; only needed if auto-detect fails.")
