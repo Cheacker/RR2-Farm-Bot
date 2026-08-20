@@ -11,6 +11,7 @@ class ADBController:
         self._serial = serial
         self.adb     = adbutils.AdbClient(host="127.0.0.1", port=5037)
         self.device  = None
+        self.last_capture_error = None
         self._connect()
 
     def _connect(self):
@@ -89,6 +90,7 @@ class ADBController:
     def current_screen(self, retries=4):
         if not self.device:
             return None
+        self.last_capture_error = None
         for attempt in range(retries):
             try:
                 img_bytes = self.device.shell("screencap -p", encoding=None, timeout=15)
@@ -102,6 +104,7 @@ class ADBController:
                     time.sleep(0.15)
             except Exception as e:
                 print(f"Failed to capture screen: {e}")
+                self.last_capture_error = str(e)
         return None
 
     def tap(self, x, y):

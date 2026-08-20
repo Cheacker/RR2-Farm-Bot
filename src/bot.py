@@ -163,6 +163,7 @@ class RR2Bot:
         self._pearl_last        = None
         self._game_load_miss    = 0
         self._screen_none_count = 0
+        self._adb_timeout_count = 0
         self._anchor_miss_streak = 0
         self._capture_inactives  = capture_inactives
         self._capture_wait_start = 0
@@ -242,6 +243,23 @@ class RR2Bot:
                 screen = self.adb.current_screen()
                 if screen is None:
                     self._screen_none_count += 1
+                    # An actual "adb read timeout" (vs. a blank/undecodable frame) means the
+                    # ADB socket itself is wedged, not just a slow frame — waiting for the
+                    # generic 100-miss counter could take many minutes since each timed-out
+                    # current_screen() call already burns up to retries*15s on its own.
+                    # Restart LDPlayer immediately after a couple of these instead.
+                    error = (self.adb.last_capture_error or "").lower()
+                    if "timeout" in error:
+                        self._adb_timeout_count += 1
+                        print(f"[LOOP] ADB read timeout ({self._adb_timeout_count}/2): {error}")
+                        if self._adb_timeout_count >= 2:
+                            print("[LOOP] Repeated ADB read timeouts — restarting LDPlayer...")
+                            self._adb_timeout_count = 0
+                            self._screen_none_count = 0
+                            self._restart_emulator()
+                            continue
+                    else:
+                        self._adb_timeout_count = 0
                     if self._screen_none_count >= 100:
                         print(f"[LOOP] No screen for {self._screen_none_count} attempts — "
                               f"emulator likely hung or disconnected, restarting it...")
@@ -251,6 +269,7 @@ class RR2Bot:
                     time.sleep(0.1)
                     continue
                 self._screen_none_count = 0
+                self._adb_timeout_count = 0
 
                 if   self.state == State.HOME:               self.handle_home(screen)
                 elif self.state == State.TROPHY_MENU:        self.handle_trophy_menu(screen)
