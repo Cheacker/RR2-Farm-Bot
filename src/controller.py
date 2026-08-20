@@ -36,7 +36,12 @@ class ADBController:
         except Exception as e:
             print(f"[ADB] Server reset failed: {e}")
 
-    def _connect(self, _retry_after_reset=True):
+    def _connect(self):
+        # No automatic server reset in here: this gets polled every few seconds
+        # while an emulator is booting (__init__, _restart_emulator), and a
+        # kill-server/start-server mid-boot can itself prevent LDPlayer from ever
+        # attaching to adb. Resetting the server is a deliberate action a caller
+        # takes once via _reconnect(), never something _connect() decides on its own.
         candidates = self._candidate_ports()
         for candidate in candidates:
             print(f"Connecting to emulator on port {candidate}...")
@@ -58,12 +63,6 @@ class ADBController:
             if not devices:
                 print("No ADB devices found. Make sure the emulator is running.")
                 self.device = None
-                if _retry_after_reset:
-                    # A plain 'adb connect' can fail to register anything if the adb
-                    # server itself is wedged from a previous crash — a full reset
-                    # often recovers it even when the instance was fine the whole time.
-                    self._adb_server_reset()
-                    self._connect(_retry_after_reset=False)
                 return
 
             # Multiple emulators can be registered with adb at once (e.g. another
@@ -113,7 +112,7 @@ class ADBController:
         self._adb_server_reset()
         try:
             self.adb = adbutils.AdbClient(host="127.0.0.1", port=5037)
-            self._connect(_retry_after_reset=False)
+            self._connect()
         except Exception as e:
             print(f"[ADB] Reconnect failed: {e}")
 
