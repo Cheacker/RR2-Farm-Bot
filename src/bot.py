@@ -313,17 +313,6 @@ class RR2Bot:
             self._trophy_miss_count += 1
             self._anchor_miss_streak += 1
             if self._trophy_miss_count > 21:
-                # Never restart while a game-opening/loading screen is actually visible,
-                # no matter how many misses this has been — icon_forge just hasn't
-                # rendered yet, it isn't a stuck state. Re-check right at the restart
-                # decision itself, not just on the periodic 10-miss cadence below.
-                if self._on_game_opening_screen(screen):
-                    print("[HOME] Forge still missing, but a game-opening screen is visible — "
-                          "waiting instead of restarting.")
-                    time.sleep(10)
-                    self._trophy_miss_count = 0
-                    self._anchor_miss_streak = 0
-                    return
                 print(f"[HOME] Forge not found after {self._trophy_miss_count} attempts — restarting game...")
                 self._trophy_miss_count = 0
                 self.adb.restart_game(RR2_PACKAGE, wait=RESTART_GAME_WAIT)
