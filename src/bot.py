@@ -61,6 +61,11 @@ SCROLL_CONFIRM_COORDS = (896, 785) # ranked-list confirm after scroll — on the
                                    # attack-prep screen this is "New Opponent",
                                    # so never tap it without confirming the screen
 
+# Transitional "game is still launching" screens between app start and the forge
+# icon rendering on HOME (splash/loading art, etc). icon_forge legitimately isn't
+# there yet on these — they're not a stuck state, just need to wait it out.
+GAME_OPEN_TEMPLATES = ["game_open_1", "game_open_2", "game_open_3", "game_open_4", "game_open_5"]
+
 # ── Drop-trophies mode (only used when --drop-trophies drop_yes) ─────────────
 # All four are unset until captured — get_coords.py for the two tap coordinates
 # and the home-return coordinate, and get_coords.py again (or just eyeball the
@@ -308,6 +313,17 @@ class RR2Bot:
             self._trophy_miss_count += 1
             self._anchor_miss_streak += 1
             if self._trophy_miss_count > 21:
+                # Never restart while a game-opening/loading screen is actually visible,
+                # no matter how many misses this has been — icon_forge just hasn't
+                # rendered yet, it isn't a stuck state. Re-check right at the restart
+                # decision itself, not just on the periodic 10-miss cadence below.
+                if self._on_game_opening_screen(screen):
+                    print("[HOME] Forge still missing, but a game-opening screen is visible — "
+                          "waiting instead of restarting.")
+                    time.sleep(10)
+                    self._trophy_miss_count = 0
+                    self._anchor_miss_streak = 0
+                    return
                 print(f"[HOME] Forge not found after {self._trophy_miss_count} attempts — restarting game...")
                 self._trophy_miss_count = 0
                 self.adb.restart_game(RR2_PACKAGE, wait=RESTART_GAME_WAIT)
@@ -319,6 +335,13 @@ class RR2Bot:
             # these are uncommon enough that scanning for them on every single miss
             # would just be wasted vision work.
             if self._trophy_miss_count % 10 == 0:
+                if self._on_game_opening_screen(screen):
+                    print("[HOME] Game-opening screen detected — waiting 10s...")
+                    time.sleep(10)
+                    self._trophy_miss_count = 0
+                    self._anchor_miss_streak = 0
+                    return
+
                 take_break = self.vision.find_template(screen, "btn_take_a_break", threshold=0.85)
                 if take_break:
                     print("[HOME] 'Take a break' popup detected — waiting 30s before dismissing...")
@@ -395,7 +418,8 @@ class RR2Bot:
         if (self.vision.find_template(screen, "icon_forge", threshold=0.90)
                 or self.vision.find_template(screen, "btn_take_a_break", threshold=0.85)
                 or self.vision.find_template(screen, "btn_king_claim", threshold=0.85)
-                or self.vision.find_template(screen, "btn_take_me_back", threshold=0.85)):
+                or self.vision.find_template(screen, "btn_take_me_back", threshold=0.85)
+                or self._on_game_opening_screen(screen)):
             return State.HOME
         if self.vision.find_template(screen, "btn_start_search", threshold=0.80):
             return State.TROPHY_MENU
@@ -411,6 +435,17 @@ class RR2Bot:
                 or self._find_chests(screen)):
             return State.CHAMBER_OF_FORTUNE
         return None
+
+    # ── Helper: is a game-launch/loading transition screen showing? ──────────
+    def _on_game_opening_screen(self, screen):
+        """True if any of the 'game is still starting up' splash/loading screens
+        is visible — icon_forge legitimately isn't rendered yet on these."""
+        if screen is None:
+            return False
+        return any(
+            self.vision.find_template(screen, name, threshold=0.85)
+            for name in GAME_OPEN_TEMPLATES
+        )
 
     # ── Helper: is the attack-prep screen showing? ────────────────────────────
     def _on_attack_prep_screen(self, screen):
@@ -797,16 +832,13 @@ class RR2Bot:
             print("[GAME_LOAD] Archer button visible, match started!")
             self._skip_top = 0
             self.adb.tap(*ARCHER_COORDS)
-            self.adb.tap(953, 566)
-            time.sleep(0.1)
+            time.sleep(0.3)
             self.adb.tap(*SECOND_TROOP_SLOT_COORDS)
-            self.adb.tap(953, 566)
-            time.sleep(0.1)
-            self.adb.tap(*SECOND_TROOP_SLOT_COORDS)
+            time.sleep(1)
             self.adb.tap(953, 566)
             self._in_game_start = time.time()
             self._last_in_game_find_state = time.time()
-            time.sleep(0.3)
+            time.sleep(2)
             self.adb.tap(*SECOND_TROOP_SLOT_COORDS)
             self.adb.tap(*ARCHER_COORDS)
             self.state = State.IN_GAME
