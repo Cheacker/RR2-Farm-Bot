@@ -170,7 +170,6 @@ class RR2Bot:
                   "trying to connect to whatever's already running instead.")
             return
         self._restart_ldplayer()
-        print(f"[EMULATOR] Restart issued — polling for a connection (up to {CONNECT_POLL_TIMEOUT}s)...")
         deadline = time.time() + CONNECT_POLL_TIMEOUT
         while time.time() < deadline:
             self.adb._connect()
@@ -189,14 +188,7 @@ class RR2Bot:
             print("[EMULATOR] ldconsole.exe not found — can't restart LDPlayer automatically.")
             return
         print(f"[EMULATOR] Restarting LDPlayer instance --index {self._ld_index}...")
-        try:
-            # 'quit' can hang if the instance is unresponsive to begin with --
-            # exactly the case this restart is meant to recover from, so it can't
-            # be allowed to block forever waiting for a clean shutdown that never comes.
-            subprocess.run([self._ldconsole, "quit", "--index", str(self._ld_index)],
-                            capture_output=True, timeout=20)
-        except subprocess.TimeoutExpired:
-            print("[EMULATOR] 'ldconsole quit' didn't respond within 20s — launching anyway.")
+        subprocess.run([self._ldconsole, "quit", "--index", str(self._ld_index)], capture_output=True)
         time.sleep(3)
         subprocess.Popen([self._ldconsole, "launch", "--index", str(self._ld_index)])
         time.sleep(15)
