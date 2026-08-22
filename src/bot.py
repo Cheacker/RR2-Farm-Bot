@@ -100,7 +100,10 @@ class State:
 class RR2Bot:
     def __init__(self, port=21503, template_dir=None, trophy_filter=600, melt_threshold=1_000_000,
                  drop_trophies=False, ld_index=0, ldconsole=None, capture_inactives=False):
-        self.adb = ADBController(port=port)
+        # Skip ADBController's own connect-on-init: connecting before the startup
+        # restart even runs is wasted work whose result gets thrown away the
+        # instant the restart happens -- only try after the restart completes.
+        self.adb = ADBController(port=port, connect_on_init=False)
         self._ld_index = ld_index
         self._ldconsole = ldconsole or find_ldconsole()
         self._startup_restart_ldplayer()
@@ -168,6 +171,7 @@ class RR2Bot:
         if not self._ldconsole:
             print("[EMULATOR] ldconsole.exe not found — can't restart LDPlayer automatically, "
                   "trying to connect to whatever's already running instead.")
+            self.adb._connect()
             return
         self._restart_ldplayer()
         deadline = time.time() + CONNECT_POLL_TIMEOUT

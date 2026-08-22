@@ -6,13 +6,14 @@ import subprocess
 
 
 class ADBController:
-    def __init__(self, serial=None, port=21503):
+    def __init__(self, serial=None, port=21503, connect_on_init=True):
         self._port   = port
         self._serial = serial
         self.adb     = adbutils.AdbClient(host="127.0.0.1", port=5037)
         self.device  = None
         self.last_capture_error = None
-        self._connect()
+        if connect_on_init:
+            self._connect()
 
     def _candidate_ports(self):
         """LDPlayer doesn't always bind adb on the expected port — it can end up one
