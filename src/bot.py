@@ -18,7 +18,15 @@ os.makedirs(CAPTURED_INACTIVES_DIR, exist_ok=True)
 RR2_PACKAGE            = "com.flaregames.rrtournament"
 RESTART_GAME_WAIT      = 13  # seconds to wait after restart_game()/a HOME popup dismissal
                               # for the game to settle back onto a stable screen
-CONNECT_POLL_TIMEOUT   = 60  # seconds to poll 'adb connect' before concluding LDPlayer needs a restart
+CONNECT_POLL_TIMEOUT   = 60  # seconds to poll 'adb connect' at startup before giving up (no restart)
+
+# Gate on restarting LDPlayer mid-run: only once the session has proven itself
+# (long runtime, many matches played) do we allow touching LDPlayer on a
+# disconnect -- restarting it over an early/transient hiccup was the actual
+# thing making startup and short sessions unreliable.
+LD_RESTART_MIN_RUNTIME  = 3600  # seconds (1 hour)
+LD_RESTART_MIN_MATCHES  = 20
+LD_RESTART_CONNECT_TIMEOUT = 30  # seconds to poll 'adb connect' before restarting LDPlayer
 
 # ldconsole.exe lives inside the versioned LDPlayer install folder (LDPlayer9,
 # LDPlayer14, ...) which differs per machine/drive — glob instead of hardcoding.
@@ -166,12 +174,12 @@ class RR2Bot:
             return False
 
     def _ensure_emulator_connected(self):
-        """Simple, non-destructive connection sequence: if already connected, do
-        nothing. Otherwise check whether LDPlayer is actually open (like glancing
-        at Task Manager) and launch it if not, then just poll 'adb connect' for a
-        while. Only if that genuinely never works do we close and reopen the
-        instance once. No adb kill-server/start-server anywhere in here — that
-        was the thing repeatedly breaking an otherwise-fine connection."""
+        """Startup-only connection sequence: if already connected, do nothing.
+        Otherwise check whether LDPlayer is actually open (like glancing at Task
+        Manager) and launch it if not, then just poll 'adb connect' for a while.
+        No quit/relaunch fallback here — restarting LDPlayer on a slow-but-fine
+        boot was the thing making startup itself unreliable. LDPlayer restarts
+        only ever happen from the main loop's gated recovery, never at startup."""
         if self.adb.device:
             return
         if not self._ldconsole:
@@ -192,31 +200,21 @@ class RR2Bot:
             if self.adb.device:
                 return
             time.sleep(3)
+        print(f"[EMULATOR] Still not connected after {CONNECT_POLL_TIMEOUT}s. Giving up for now — "
+              f"the main loop will keep trying and can restart LDPlayer later if needed.")
 
-        print(f"[EMULATOR] Still not connected after {CONNECT_POLL_TIMEOUT}s — "
-              f"closing and reopening the instance...")
+    def _restart_ldplayer(self):
+        """Just close and reopen the instance — no adb kill-server/start-server,
+        no isrunning check, nothing else. Only called from the main loop's gated
+        recovery (long runtime + many matches + a real, sustained disconnect)."""
+        if not self._ldconsole:
+            print("[EMULATOR] ldconsole.exe not found — can't restart LDPlayer automatically.")
+            return
+        print(f"[EMULATOR] Restarting LDPlayer instance --index {self._ld_index}...")
         subprocess.run([self._ldconsole, "quit", "--index", str(self._ld_index)], capture_output=True)
         time.sleep(3)
         subprocess.Popen([self._ldconsole, "launch", "--index", str(self._ld_index)])
-
-        deadline = time.time() + 90
-        while time.time() < deadline:
-            self.adb._connect()
-            if self.adb.device:
-                return
-            time.sleep(3)
-        print("[EMULATOR] Instance still not visible to ADB after a restart. Giving up.")
-
-    # ── Shutdown helper ───────────────────────────────────────────────────────
-    def _shutdown(self, reason: str):
-        print(f"[SHUTDOWN] Reason: {reason}")
-        fresh = self.adb.current_screen()
-        if fresh is not None:
-            ts   = time.strftime('%Y%m%d_%H%M%S')
-            path = os.path.join(FAIL_DEBUG_DIR, f'{ts}_{reason}.png')
-            cv2.imwrite(path, fresh)
-            print(f"[SHUTDOWN] Screenshot saved: {path}")
-        self.running = False
+        time.sleep(15)
 
     # ── Main loop ─────────────────────────────────────────────────────────────
     def loop(self):
@@ -228,20 +226,44 @@ class RR2Bot:
                 if screen is None:
                     self._screen_none_count += 1
                     if self._screen_none_count >= 20:
-                        print(f"[LOOP] No screen for {self._screen_none_count} attempts — "
-                              f"connection appears lost, running recovery...")
                         self._screen_none_count = 0
+                        print("[LOOP] No screen for a while — checking the connection...")
                         self.adb.device = None
-                        self._ensure_emulator_connected()
-                        if not self.adb.device:
-                            print("[LOOP] Could not recover the ADB connection. Stopping — "
-                                  "restart LDPlayer and re-run the bot.")
-                            self._shutdown("adb_connection_lost")
-                            break
-                        self.adb.ensure_resolution(1600, 900)
-                        self.adb.restart_game(RR2_PACKAGE, wait=RESTART_GAME_WAIT)
-                        self.state = State.HOME
-                        continue
+                        self.adb._connect()
+                        if self.adb.device:
+                            self.adb.ensure_resolution(1600, 900)
+                            self.adb.restart_game(RR2_PACKAGE, wait=RESTART_GAME_WAIT)
+                            self.state = State.HOME
+                            continue
+
+                        runtime = time.time() - self._start_time
+                        if runtime > LD_RESTART_MIN_RUNTIME and self._match_count > LD_RESTART_MIN_MATCHES:
+                            print(f"[LOOP] Still disconnected (runtime={runtime:.0f}s, "
+                                  f"matches={self._match_count}) — polling {LD_RESTART_CONNECT_TIMEOUT}s "
+                                  f"before restarting LDPlayer...")
+                            deadline = time.time() + LD_RESTART_CONNECT_TIMEOUT
+                            while time.time() < deadline:
+                                self.adb._connect()
+                                if self.adb.device:
+                                    break
+                                time.sleep(3)
+                            if not self.adb.device:
+                                self._restart_ldplayer()
+                                deadline = time.time() + 90
+                                while time.time() < deadline:
+                                    self.adb._connect()
+                                    if self.adb.device:
+                                        break
+                                    time.sleep(3)
+                            if self.adb.device:
+                                self.adb.ensure_resolution(1600, 900)
+                                self.adb.restart_game(RR2_PACKAGE, wait=RESTART_GAME_WAIT)
+                                self.state = State.HOME
+                        else:
+                            print(f"[LOOP] Disconnected, but restart conditions not met yet (need "
+                                  f"runtime>{LD_RESTART_MIN_RUNTIME}s and matches>{LD_RESTART_MIN_MATCHES}; "
+                                  f"have runtime={runtime:.0f}s, matches={self._match_count}) — "
+                                  f"retrying the connection without touching LDPlayer.")
                     time.sleep(0.1)
                     continue
                 self._screen_none_count = 0
