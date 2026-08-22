@@ -103,7 +103,7 @@ class RR2Bot:
         self.adb = ADBController(port=port)
         self._ld_index = ld_index
         self._ldconsole = ldconsole or find_ldconsole()
-        self._ensure_emulator_connected()
+        self._startup_restart_ldplayer()
         if not self.adb.device:
             print("ADB connection failed. Start LDPlayer manually and re-run.")
             exit(1)
@@ -158,55 +158,32 @@ class RR2Bot:
         self.db = PlayerDB()
 
     # ── Emulator connection ───────────────────────────────────────────────────
-    def _ldplayer_running(self):
-        """Ask ldconsole itself whether the instance is up — the equivalent of
-        checking Task Manager, without guessing at process names."""
+    def _startup_restart_ldplayer(self):
+        """Always do one clean LDPlayer restart at bot startup, every run — even
+        if ADB already sees a device. The instance itself can be left in a wedged
+        state (rendering stalls, stuck input, etc) from the previous run that a
+        healthy-looking connection wouldn't reveal, so a cold restart is the
+        reliable baseline. Just one quit+launch, then poll 'adb connect' — no
+        repeated resets, no adb kill-server/start-server."""
         if not self._ldconsole:
-            return False
-        try:
-            out = subprocess.run(
-                [self._ldconsole, "isrunning", "--index", str(self._ld_index)],
-                capture_output=True, text=True, timeout=10
-            )
-            return "running" in out.stdout.strip().lower()
-        except Exception as e:
-            print(f"[EMULATOR] isrunning check failed: {e}")
-            return False
-
-    def _ensure_emulator_connected(self):
-        """Startup-only connection sequence: if already connected, do nothing.
-        Otherwise check whether LDPlayer is actually open (like glancing at Task
-        Manager) and launch it if not, then just poll 'adb connect' for a while.
-        No quit/relaunch fallback here — restarting LDPlayer on a slow-but-fine
-        boot was the thing making startup itself unreliable. LDPlayer restarts
-        only ever happen from the main loop's gated recovery, never at startup."""
-        if self.adb.device:
+            print("[EMULATOR] ldconsole.exe not found — can't restart LDPlayer automatically, "
+                  "trying to connect to whatever's already running instead.")
             return
-        if not self._ldconsole:
-            print("[EMULATOR] ldconsole.exe not found — can't check or launch LDPlayer "
-                  "automatically. Start it manually, or pass --ldconsole.")
-            return
-
-        if self._ldplayer_running():
-            print(f"[EMULATOR] LDPlayer instance --index {self._ld_index} is already open — "
-                  f"trying to connect...")
-        else:
-            print(f"[EMULATOR] LDPlayer instance --index {self._ld_index} is not open — launching...")
-            subprocess.Popen([self._ldconsole, "launch", "--index", str(self._ld_index)])
-
+        self._restart_ldplayer()
         deadline = time.time() + CONNECT_POLL_TIMEOUT
         while time.time() < deadline:
             self.adb._connect()
             if self.adb.device:
                 return
             time.sleep(3)
-        print(f"[EMULATOR] Still not connected after {CONNECT_POLL_TIMEOUT}s. Giving up for now — "
-              f"the main loop will keep trying and can restart LDPlayer later if needed.")
+        print(f"[EMULATOR] Still not connected after {CONNECT_POLL_TIMEOUT}s post-restart. "
+              f"Giving up for now — the main loop will keep trying.")
 
     def _restart_ldplayer(self):
         """Just close and reopen the instance — no adb kill-server/start-server,
-        no isrunning check, nothing else. Only called from the main loop's gated
-        recovery (long runtime + many matches + a real, sustained disconnect)."""
+        no isrunning check, nothing else. Called once at every startup, and from
+        the main loop's gated recovery (long runtime + many matches + a real,
+        sustained disconnect)."""
         if not self._ldconsole:
             print("[EMULATOR] ldconsole.exe not found — can't restart LDPlayer automatically.")
             return
