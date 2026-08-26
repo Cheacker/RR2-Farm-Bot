@@ -16,7 +16,7 @@ CAPTURED_INACTIVES_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.ab
 os.makedirs(CAPTURED_INACTIVES_DIR, exist_ok=True)
 
 RR2_PACKAGE            = "com.flaregames.rrtournament"
-RESTART_GAME_WAIT      = 13  # seconds to wait after restart_game()/a HOME popup dismissal
+RESTART_GAME_WAIT      = 18  # seconds to wait after restart_game()/a HOME popup dismissal
                               # for the game to settle back onto a stable screen
 CONNECT_POLL_TIMEOUT   = 60  # seconds to poll 'adb connect' at startup before giving up (no restart)
 
@@ -26,7 +26,7 @@ CONNECT_POLL_TIMEOUT   = 60  # seconds to poll 'adb connect' at startup before g
 # thing making startup and short sessions unreliable.
 LD_RESTART_MIN_RUNTIME  = 3600  # seconds (1 hour)
 LD_RESTART_MIN_MATCHES  = 20
-LD_RESTART_CONNECT_TIMEOUT = 30  # seconds to poll 'adb connect' before restarting LDPlayer
+LD_RESTART_CONNECT_TIMEOUT = 60  # seconds to poll 'adb connect' before restarting LDPlayer
 
 # ldconsole.exe lives inside the versioned LDPlayer install folder (LDPlayer9,
 # LDPlayer14, ...) which differs per machine/drive — glob instead of hardcoding.
@@ -134,6 +134,8 @@ class RR2Bot:
         self._scroll_count      = 0
         self._chest_taps        = 0
         self._match_count       = 0
+        self._last_restart_match_count = 0
+        self._last_restart_start_time = time.time()
         self._start_time        = time.time()
         self._loop_start        = time.time()
         self._no_opponent_count = 0
@@ -194,6 +196,8 @@ class RR2Bot:
         print(f"[EMULATOR] Restarting LDPlayer instance --index {self._ld_index}...")
         subprocess.run([self._ldconsole, "quit", "--index", str(self._ld_index)], capture_output=True)
         time.sleep(3)
+        self._last_restart_match_count = 0
+        self.last_restart_start_time = time.time()
         subprocess.Popen([self._ldconsole, "launch", "--index", str(self._ld_index)])
         time.sleep(15)
 
@@ -217,10 +221,10 @@ class RR2Bot:
                             self.state = State.HOME
                             continue
 
-                        runtime = time.time() - self._start_time
-                        if runtime > LD_RESTART_MIN_RUNTIME and self._match_count > LD_RESTART_MIN_MATCHES:
+                        runtime = time.time() - self._last_restart_start_time
+                        if runtime > LD_RESTART_MIN_RUNTIME and self._last_restart_match_count > LD_RESTART_MIN_MATCHES:
                             print(f"[LOOP] Still disconnected (runtime={runtime:.0f}s, "
-                                  f"matches={self._match_count}) — polling {LD_RESTART_CONNECT_TIMEOUT}s "
+                                  f"matches={self._last_restart_match_count/self._match_count}) — polling {LD_RESTART_CONNECT_TIMEOUT}s "
                                   f"before restarting LDPlayer...")
                             deadline = time.time() + LD_RESTART_CONNECT_TIMEOUT
                             while time.time() < deadline:
@@ -243,7 +247,7 @@ class RR2Bot:
                         else:
                             print(f"[LOOP] Disconnected, but restart conditions not met yet (need "
                                   f"runtime>{LD_RESTART_MIN_RUNTIME}s and matches>{LD_RESTART_MIN_MATCHES}; "
-                                  f"have runtime={runtime:.0f}s, matches={self._match_count}) — "
+                                  f"have runtime={runtime:.0f}s, matches={self._last_restart_match_count/self._match_count}) — "
                                   f"retrying the connection without touching LDPlayer.")
                     time.sleep(0.1)
                     continue
@@ -381,7 +385,13 @@ class RR2Bot:
             if close:
                 print("[HOME] Pressing btn_close...")
                 self.adb.tap(close[0], close[1])
-                time.sleep(0.3)
+                time.sleep(0.5)
+
+                close = self.vision.find_template(screen, "btn_close", threshold=0.57)
+                if close:
+                    print("[HOME] Pressing btn_close...")
+                    self.adb.tap(close[0], close[1])
+                    time.sleep(0.5)
 
             if self._trophy_miss_count % 2 == 0:
                 self.adb.tap(10, 10)
@@ -917,6 +927,7 @@ class RR2Bot:
     def _cof_tap_home(self):
         now = time.time()
         self._match_count += 1
+        self._last_restart_match_count += 1
         loop_dur  = now - self._loop_start
         total_secs = int(now - self._start_time)
         self._loop_start = now
@@ -995,15 +1006,12 @@ class RR2Bot:
 
             chests = self._find_chests(f)
             if not chests:
-                missed_chests += 1
-                if missed_chests == 2:
-                    self._cof_tap_home()
-                    return
-                else:
-                    continue
+                self._cof_tap_home()
+                return
+
 
             target = chests[0]
-            print(f"[COF] Opening chest 1 ({self._chest_taps + 1}/3)...")
+            print(f"[COF] Opening chest ({self._chest_taps + 1}/3)...")
             self.adb.tap(target[0], target[1])
             time.sleep(0.5)
 
