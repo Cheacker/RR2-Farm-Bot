@@ -4,6 +4,7 @@ src/__pycache__/
 *.pyc
 *.pyo
 player_data.json
+session_log.txt
 fail_debug/
 captured_inactives/
 .zipmem/

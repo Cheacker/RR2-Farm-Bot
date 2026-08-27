@@ -15,6 +15,11 @@ os.makedirs(FAIL_DEBUG_DIR, exist_ok=True)
 CAPTURED_INACTIVES_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "captured_inactives")
 os.makedirs(CAPTURED_INACTIVES_DIR, exist_ok=True)
 
+# Per-hour debug log: cleared at the start of every bot run (not accumulated
+# across runs) -- meant for "what happened during this specific session",
+# not a long-term history file.
+SESSION_LOG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "session_log.txt")
+
 RR2_PACKAGE            = "com.flaregames.rrtournament"
 RESTART_GAME_WAIT      = 18  # seconds to wait after restart_game()/a HOME popup dismissal
                               # for the game to settle back onto a stable screen
@@ -156,6 +161,17 @@ class RR2Bot:
         self._scroll_no_progress = 0
         self._scroll_attempts    = 0
         self.db = PlayerDB()
+
+        # Per-hour debug log — truncated (not appended) on every bot run, so it
+        # always reflects only the current session.
+        with open(SESSION_LOG_PATH, "w", encoding="utf-8") as f:
+            f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Session started "
+                     f"(trophy_filter={trophy_filter}, melt_threshold={melt_threshold}, "
+                     f"drop_trophies={drop_trophies})\n")
+        self._session_log_hour_index      = 0
+        self._session_log_hour_matches    = 0
+        self._session_log_hour_loop_sum   = 0.0
+        self._session_log_hour_pearl_start = None
 
     # ── Emulator connection ───────────────────────────────────────────────────
     def _startup_restart_ldplayer(self):
@@ -395,6 +411,7 @@ class RR2Bot:
         take_break = self.vision.find_template(screen, "btn_take_a_break", threshold=0.85)
         if take_break:
             print("[FIND_STATE] 'Take a break' popup detected — dismissing...")
+            self._log_to_file("'Take a break' popup detected — dismissing")
             self.adb.tap(take_break[0], take_break[1])
             time.sleep(30)
             return State.HOME
@@ -403,7 +420,7 @@ class RR2Bot:
         if king:
             print("[FIND_STATE] 'I am the King' popup detected — claiming...")
             self.adb.tap(king[0], king[1])
-            time.sleep(30)
+            time.sleep(RESTART_GAME_WAIT)
             return State.HOME
 
         if (self.vision.find_template(screen, "icon_forge", threshold=0.90)
@@ -898,6 +915,31 @@ class RR2Bot:
                 self.state = State.CHAMBER_OF_FORTUNE
                 time.sleep(1.25)
 
+    # ── Session log helpers ───────────────────────────────────────────────────
+    def _log_to_file(self, message):
+        """Append a timestamped line to the per-run debug log (SESSION_LOG_PATH).
+        Best-effort — never let a logging failure take down the bot."""
+        try:
+            with open(SESSION_LOG_PATH, "a", encoding="utf-8") as f:
+                f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}\n")
+        except Exception as e:
+            print(f"[LOG] Failed to write to session log: {e}")
+
+    def _flush_hour_log(self):
+        """Write a summary line for the hour bucket that just ended: average match
+        loop time and pearls earned during that hour. Debug aid for spotting which
+        hours of a long run went slow or stopped earning."""
+        avg_loop = (self._session_log_hour_loop_sum / self._session_log_hour_matches
+                    if self._session_log_hour_matches else 0)
+        if self._pearl_last is not None and self._session_log_hour_pearl_start is not None:
+            pearl_str = str(self._pearl_last - self._session_log_hour_pearl_start)
+        else:
+            pearl_str = "?"
+        self._log_to_file(
+            f"Hour {self._session_log_hour_index + 1} summary — "
+            f"matches: {self._session_log_hour_matches}, avg loop: {avg_loop:.0f}s, pearls: {pearl_str}"
+        )
+
     # ── COF helpers ───────────────────────────────────────────────────────────
     def _cof_tap_home(self):
         now = time.time()
@@ -913,12 +955,29 @@ class RR2Bot:
         if self._gold_last is not None and self._gold_start is not None:
             gold_gain  = self._gold_last  - self._gold_start
             pearl_gain = self._pearl_last - self._pearl_start
-            resources  = f" | Gold: + {gold_gain:,} | Pearls: +{pearl_gain}"
+            hours = total_secs / 3600
+            pearl_per_hour = pearl_gain / hours if hours > 0 else 0
+            resources  = f" | Gold: + {gold_gain:,} | Pearls: +{pearl_gain} | Pearls/hr: {pearl_per_hour:.0f}"
         else:
             resources = ""
         print("--------------------------------------------------------------------")
         print(f"[COF] Match #{self._match_count} | Loop: {loop_dur:.0f}s | Total: {total_str} | Avg: {total_secs/self._match_count:.0f}s{resources}")
         print("--------------------------------------------------------------------")
+
+        # Per-hour debug log: roll the bucket over whenever total elapsed time
+        # crosses into a new hour, flushing a summary of the hour that just ended.
+        hour_index = total_secs // 3600
+        if self._session_log_hour_pearl_start is None:
+            self._session_log_hour_pearl_start = self._pearl_last
+        self._session_log_hour_matches  += 1
+        self._session_log_hour_loop_sum += loop_dur
+        if hour_index > self._session_log_hour_index:
+            self._flush_hour_log()
+            self._session_log_hour_index       = hour_index
+            self._session_log_hour_matches     = 0
+            self._session_log_hour_loop_sum    = 0.0
+            self._session_log_hour_pearl_start = self._pearl_last
+
         self.adb.tap(500, 500)
         self._chest_taps    = 0
         self._current_target = None
