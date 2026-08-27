@@ -35,15 +35,6 @@ SESSIONS = {
     "25": ("GRAY attack button (unattackable opponent, pre-match screen)", ["btn_attack_start_gray"]),
     "26": ("'Take a break' reminder popup button (usually home screen)", ["btn_take_a_break"]),
     "27": ("'I am the King' claim popup button (home screen)", ["btn_king_claim"]),
-    # These are 5 SEPARATE options, not one grouped crop -- each game-opening/loading
-    # screen appears at a different moment during launch, so restart the game and
-    # catch a different one for each, unlike the chests (which are all on one screen).
-    "28": ("Game-opening/loading screen #1 (restart game, catch it before icon_forge appears)", ["game_open_1"]),
-    "29": ("Game-opening/loading screen #2 (restart game again, catch a different moment)", ["game_open_2"]),
-    "30": ("Game-opening/loading screen #3 (restart game again, catch a different moment)", ["game_open_3"]),
-    "31": ("Game-opening/loading screen #4 (restart game again, catch a different moment)", ["game_open_4"]),
-    "32": ("Game-opening/loading screen #5 (restart game again, catch a different moment)", ["game_open_5"]),
-
 }
 
 SAVE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "En_Templates")

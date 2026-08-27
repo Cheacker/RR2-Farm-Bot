@@ -69,11 +69,6 @@ SCROLL_CONFIRM_COORDS = (896, 785) # ranked-list confirm after scroll — on the
                                    # attack-prep screen this is "New Opponent",
                                    # so never tap it without confirming the screen
 
-# Transitional "game is still launching" screens between app start and the forge
-# icon rendering on HOME (splash/loading art, etc). icon_forge legitimately isn't
-# there yet on these — they're not a stuck state, just need to wait it out.
-GAME_OPEN_TEMPLATES = ["game_open_1", "game_open_2", "game_open_3", "game_open_4", "game_open_5"]
-
 # ── Drop-trophies mode (only used when --drop-trophies drop_yes) ─────────────
 # All four are unset until captured — get_coords.py for the two tap coordinates
 # and the home-return coordinate, and get_coords.py again (or just eyeball the
@@ -331,32 +326,6 @@ class RR2Bot:
             # these are uncommon enough that scanning for them on every single miss
             # would just be wasted vision work.
             if self._trophy_miss_count % 10 == 0:
-                if self._on_game_opening_screen(screen):
-                    print("[HOME] Game-opening screen detected — waiting 10s...")
-                    time.sleep(10)
-                    self._trophy_miss_count = 0
-                    self._anchor_miss_streak = 0
-                    return
-
-                take_break = self.vision.find_template(screen, "btn_take_a_break", threshold=0.85)
-                if take_break:
-                    print("[HOME] 'Take a break' popup detected — waiting 30s before dismissing...")
-                    time.sleep(30)
-                    self.adb.tap(take_break[0], take_break[1])
-                    time.sleep(RESTART_GAME_WAIT)
-                    self._trophy_miss_count = 0
-                    self._anchor_miss_streak = 0
-                    return
-
-                king = self.vision.find_template(screen, "btn_king_claim", threshold=0.85)
-                if king:
-                    print("[HOME] 'I am the King' popup detected — claiming...")
-                    self.adb.tap(king[0], king[1])
-                    time.sleep(RESTART_GAME_WAIT)
-                    self._trophy_miss_count = 0
-                    self._anchor_miss_streak = 0
-                    return
-
                 # 'Connected another device' popup uses the same button/template as
                 # GAME_LOAD's btn_take_me_back — checked here too since this popup can
                 # also interrupt at HOME.
@@ -417,11 +386,28 @@ class RR2Bot:
         cheap enough to run occasionally, too much vision work to run every loop."""
         if screen is None:
             return None
+
+        # These two are full-screen blocking popups icon_forge can never see past.
+        # Dismissing them is handled here rather than in handle_home, since
+        # _find_state already runs as the general "figure out what's actually on
+        # screen" fallback -- finding one of these IS the answer, so act on it and
+        # report HOME rather than just detecting and leaving it for something else.
+        take_break = self.vision.find_template(screen, "btn_take_a_break", threshold=0.85)
+        if take_break:
+            print("[FIND_STATE] 'Take a break' popup detected — dismissing...")
+            self.adb.tap(take_break[0], take_break[1])
+            time.sleep(30)
+            return State.HOME
+
+        king = self.vision.find_template(screen, "btn_king_claim", threshold=0.85)
+        if king:
+            print("[FIND_STATE] 'I am the King' popup detected — claiming...")
+            self.adb.tap(king[0], king[1])
+            time.sleep(30)
+            return State.HOME
+
         if (self.vision.find_template(screen, "icon_forge", threshold=0.90)
-                or self.vision.find_template(screen, "btn_take_a_break", threshold=0.85)
-                or self.vision.find_template(screen, "btn_king_claim", threshold=0.85)
-                or self.vision.find_template(screen, "btn_take_me_back", threshold=0.85)
-                or self._on_game_opening_screen(screen)):
+                or self.vision.find_template(screen, "btn_take_me_back", threshold=0.85)):
             return State.HOME
         if self.vision.find_template(screen, "btn_start_search", threshold=0.80):
             return State.TROPHY_MENU
@@ -437,17 +423,6 @@ class RR2Bot:
                 or self._find_chests(screen)):
             return State.CHAMBER_OF_FORTUNE
         return None
-
-    # ── Helper: is a game-launch/loading transition screen showing? ──────────
-    def _on_game_opening_screen(self, screen):
-        """True if any of the 'game is still starting up' splash/loading screens
-        is visible — icon_forge legitimately isn't rendered yet on these."""
-        if screen is None:
-            return False
-        return any(
-            self.vision.find_template(screen, name, threshold=0.85)
-            for name in GAME_OPEN_TEMPLATES
-        )
 
     # ── Helper: is the attack-prep screen showing? ────────────────────────────
     def _on_attack_prep_screen(self, screen):
