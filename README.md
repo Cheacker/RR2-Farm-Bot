@@ -9,6 +9,7 @@ Everything runs locally on your PC. Nothing is uploaded anywhere, and the bot do
 > **Use at your own risk.** Automating a mobile game like this is against most games' Terms of Service. This project is shared for educational purposes (computer vision, state machines, ADB automation). You are responsible for what you do with it.
 
 YouTube: www.youtube.com/@Cheacker-v5t
+!You need to place boosted archer to the first troop slot
 ---
 
 ## What it does
