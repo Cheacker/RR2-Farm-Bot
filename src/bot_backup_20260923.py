@@ -29,9 +29,9 @@ CONNECT_POLL_TIMEOUT   = 60  # seconds to poll 'adb connect' at startup before g
 # (long runtime, many matches played) do we allow touching LDPlayer on a
 # disconnect -- restarting it over an early/transient hiccup was the actual
 # thing making startup and short sessions unreliable.
-LD_RESTART_MIN_RUNTIME  = 3600  # seconds (1 hour)
-LD_RESTART_MIN_MATCHES  = 20
-LD_RESTART_CONNECT_TIMEOUT = 60  # seconds to poll 'adb connect' before restarting LDPlayer
+LD_RESTART_MIN_RUNTIME  = 600  # seconds
+LD_RESTART_MIN_MATCHES  = 7
+LD_RESTART_CONNECT_TIMEOUT = 45  # seconds to poll 'adb connect' before restarting LDPlayer
 
 # ldconsole.exe lives inside the versioned LDPlayer install folder (LDPlayer9,
 # LDPlayer14, ...) which differs per machine/drive — glob instead of hardcoding.
@@ -65,12 +65,14 @@ MINUS_LEFT_COORDS  = (810, 226)
 MINUS_RIGHT_COORDS = (1084, 226)
 PLUS_LEFT_COORDS   = (985, 229)
 PLUS_RIGHT_COORDS  = (1258, 226)
-IN_GAME_TAP_COORDS = (10, 10) # (1130, 274) for real tap on map
+IN_GAME_TAP_COORDS = (880, 415)
 GEAR_SET_1_COORDS  = (226, 818)
 GEAR_SET_2_COORDS  = (298, 820)
 GEAR_SET_3_COORDS  = (366, 818)
 VIDEO_CLOSE_COORDS = (1522, 94)
 SHOP_COORDS        = (1540, 508)
+NEW_OPPONENT_COORDS = (896, 785)
+BTN_BIG_COLLECT_COORDS = (773, 796)
 GREEN_BACK_COORDS  = (1430, 85)    # back out of attack prep / loading screen
 SCROLL_CONFIRM_COORDS = (896, 785) # ranked-list confirm after scroll — on the
                                    # attack-prep screen this is "New Opponent",
@@ -209,8 +211,7 @@ class RR2Bot:
         print(f"[EMULATOR] Restarting LDPlayer instance --index {self._ld_index}...")
         subprocess.run([self._ldconsole, "quit", "--index", str(self._ld_index)], capture_output=True)
         time.sleep(3)
-        self._last_restart_match_count = 0
-        self.last_restart_start_time = time.time()
+        self._last_restart_start_time = time.time()
         subprocess.Popen([self._ldconsole, "launch", "--index", str(self._ld_index)])
         time.sleep(15)
 
@@ -385,10 +386,14 @@ class RR2Bot:
                 time.sleep(0.1)
 
             if self._trophy_miss_count % 10 == 0:
-                btn_big_collect = self.vision.find_template(screen, "btn_big_collect", threshold=0.80)
+                btn_big_collect = self.vision.find_template(screen, "btn_big_collect", threshold=0.65)
                 if btn_big_collect:
                     print("[HOME] btn_big_collect found, tapping...")
                     self.adb.tap(btn_big_collect[0], btn_big_collect[1])
+                    time.sleep(1)
+                else:
+                    print("[HOME] btn_big_collect not matched — tapping known coords as fallback...")
+                    self.adb.tap(*BTN_BIG_COLLECT_COORDS)
                     time.sleep(1)
 
                 league = self.vision.find_template(screen, "btn_collect_league", threshold=0.80)
@@ -442,6 +447,21 @@ class RR2Bot:
                 or self.vision.find_template(screen, "btn_sell", threshold=0.70)
                 or self._find_chests(screen)):
             return State.CHAMBER_OF_FORTUNE
+
+        # Shop/worker popup — none of the template anchors matched, so fall back
+        # to OCR on the region where "Worker" text appears (208,428 → 320,466).
+        worker_text = self.vision.read_region_text(screen, 208, 428, 320, 466)
+        if "worker" in worker_text:
+            print("[FIND_STATE] Shop/worker popup detected via OCR — dismissing...")
+            self._log_to_file("Shop/worker popup detected via OCR — dismissing")
+            close = self.vision.find_template(screen, "btn_close", threshold=0.57)
+            if close:
+                self.adb.tap(close[0], close[1])
+            else:
+                self.adb.tap(1524, 86)  # fallback close coordinate
+            time.sleep(0.5)
+            return State.HOME
+
         return None
 
     # ── Helper: is the attack-prep screen showing? ────────────────────────────
@@ -612,7 +632,7 @@ class RR2Bot:
 
             print("[TROPHY_MENU] Search button found, adjusting filters then tapping...")
             self.adb.tap(yellow[0], yellow[1])
-            time.sleep(1)
+            time.sleep(2)
             self.state = State.FILTERED_RANKS
             return
         print(f"[TROPHY_MENU] Search button not found, tapping blue search coordinates: {BLUE_SEARCH_COORDS}")
@@ -726,8 +746,9 @@ class RR2Bot:
         if self._has_yellow_attack(screen):
             self._anchor_miss_streak = 0
             print("[ATTACK_PREP] Attack button found (OCR), pressing → GAME_LOAD...")
+            time.sleep(0.2)
             self.adb.tap(*GEAR_SET_3_COORDS)
-            time.sleep(0.1)
+            time.sleep(0.2)
             self.adb.tap(*ATTACK_BTN_COORDS)
             self.state = State.GAME_LOAD
 
@@ -740,7 +761,7 @@ class RR2Bot:
     # ── ATTACK_PREP (capture-inactives mode) ──────────────────────────────────
     def handle_capture_inactives(self, screen):
         """Dedicated collection mode (--capture-inactives): stays on the attack-prep
-        screen forever, using the static 'New Opponent' button (SCROLL_CONFIRM_COORDS)
+        screen forever, using the static 'New Opponent' button (NEW_OPPONENT_COORDS)
         to reroll. An attackable (yellow) or already-recognized gray opponent gets
         rerolled immediately; an opponent where neither renders within 10s is the
         harder-to-find case — its screenshot is saved to CAPTURED_INACTIVES_DIR for
@@ -750,13 +771,13 @@ class RR2Bot:
         gray   = self.vision.find_template(screen, "btn_attack_start_gray", threshold=0.85)
         if yellow:
             print("[CAPTURE_INACTIVES] Attackable — rerolling for another opponent...")
-            self.adb.tap(*SCROLL_CONFIRM_COORDS)
+            self.adb.tap(*NEW_OPPONENT_COORDS)
             self._capture_wait_start = time.time()
             time.sleep(0.5)
             return
         if gray:
             print("[CAPTURE_INACTIVES] Gray button already recognized — rerolling for more...")
-            self.adb.tap(*SCROLL_CONFIRM_COORDS)
+            self.adb.tap(*NEW_OPPONENT_COORDS)
             self._capture_wait_start = time.time()
             time.sleep(0.5)
             return
@@ -768,14 +789,12 @@ class RR2Bot:
             path = os.path.join(CAPTURED_INACTIVES_DIR, f'{ts}_unrecognized_attack_prep.png')
             cv2.imwrite(path, screen)
             print(f"[CAPTURE_INACTIVES] Neither button recognized for 10s — saved {path}")
-            self.adb.tap(*SCROLL_CONFIRM_COORDS)
+            self.adb.tap(*NEW_OPPONENT_COORDS)
             self._capture_wait_start = time.time()
             time.sleep(0.5)
 
     # ── GAME_LOAD ─────────────────────────────────────────────────────────────
     def handle_game_load(self, screen):
-        time.sleep(0.1)
-        self.adb.tap(*SECOND_TROOP_SLOT_COORDS)
         video_btn = self.vision.find_template(screen, "btn_video", threshold=0.90)
         if video_btn:
             print("[GAME_LOAD] Video/food offer detected → buying food...")
@@ -835,21 +854,14 @@ class RR2Bot:
             self._anchor_miss_streak = 0
             print("[GAME_LOAD] Archer button visible, match started!")
             self._skip_top = 0
-            self.adb.tap(*ARCHER_COORDS)
-            time.sleep(0.3)
-            self.adb.tap(*SECOND_TROOP_SLOT_COORDS)
-            time.sleep(1)
-            self.adb.tap(953, 566)
             self._in_game_start = time.time()
             self._last_in_game_find_state = time.time()
-            time.sleep(2)
-            self.adb.tap(*SECOND_TROOP_SLOT_COORDS)
-            self.adb.tap(*ARCHER_COORDS)
             self.state = State.IN_GAME
+            time.sleep(0.1)
             return 
         self._game_load_miss += 1
         self._anchor_miss_streak += 1
-        if self._game_load_miss >= 15:
+        if self._game_load_miss >= 20:
             # Don't restart blind — the match may already have finished (btn_archer can
             # be missed entirely if it renders differently than the template expects),
             # in which case a restart here tears down the app mid-loot-screen instead of
@@ -877,8 +889,12 @@ class RR2Bot:
 
     # ── IN_GAME ───────────────────────────────────────────────────────────────
     def handle_in_game(self, screen):
+        for _ in range(1):
+            self.adb.tap(*ARCHER_COORDS)
+            time.sleep(0.2)
+            self.adb.tap(*SECOND_TROOP_SLOT_COORDS)
+            time.sleep(0.2)
         now = time.time()
-
         drop_coords_ready = DROP_BUTTON_1_COORDS and DROP_BUTTON_2_COORDS and DROP_HOME_COORDS
         if (self._drop_trophies and drop_coords_ready
                 and self._in_game_start > 0 and now - self._in_game_start >= 2):
@@ -913,7 +929,9 @@ class RR2Bot:
             return
         if now - self._last_tap >= 1:
             self._last_tap = now
-            self.adb.tap(*IN_GAME_TAP_COORDS)
+            for _ in range(4):
+                self.adb.tap(*IN_GAME_TAP_COORDS)
+                time.sleep(0.2)
             print(f"Tapped: {IN_GAME_TAP_COORDS}")
 
         if screen is not None and now - self._last_end_check >= 3:
@@ -1014,7 +1032,6 @@ class RR2Bot:
 
     def handle_chamber_of_fortune(self, screen):
         time.sleep(1)
-        missed_chests = 0
         loop1_start = time.time()
         while self.running and self._chest_taps < 3:
             if time.time() - loop1_start > self._COF_LOOP_TIMEOUT:
@@ -1045,7 +1062,6 @@ class RR2Bot:
                 else:
                     print(f"[COF] Sell: {sell}")
                     self.adb.tap(sell[0], sell[1])
-                missed_chests = 0
                 continue
 
             chests = self._find_chests(f)
@@ -1057,7 +1073,7 @@ class RR2Bot:
             target = chests[0]
             print(f"[COF] Opening chest ({self._chest_taps + 1}/3)...")
             self.adb.tap(target[0], target[1])
-            time.sleep(0.5)
+            time.sleep(0.3)
 
             f2 = self.adb.current_screen()
             if f2 is not None:

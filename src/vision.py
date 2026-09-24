@@ -116,3 +116,17 @@ class VisionInterpreter:
         _, thresh = cv2.threshold(upscaled, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         name = pytesseract.image_to_string(thresh, config="--psm 7 --oem 3").strip()
         return name
+
+    def read_region_text(self, screen, x1: int, y1: int, x2: int, y2: int) -> str:
+        """OCR a rectangular region and return the detected text (lowercase), or empty string."""
+        if screen is None:
+            return ""
+        region = screen[y1:y2, x1:x2]
+        if region.size == 0:
+            return ""
+        gray = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)
+        upscaled = cv2.resize(gray, (0, 0), fx=2, fy=2, interpolation=cv2.INTER_LINEAR)
+        _, thresh = cv2.threshold(upscaled, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        raw = pytesseract.image_to_string(thresh, config="--psm 7 --oem 3").strip()
+        return raw.lower()
+
