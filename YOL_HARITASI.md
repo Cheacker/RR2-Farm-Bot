@@ -66,8 +66,10 @@ Her şablon kendi bölgesinde ve kendi ekran imzasıyla birlikte aranmalı.
 | Maç içi | `btn_archer` | ~1:40 süre; sağ üstte **15 elmaslık** iki güçlendirme (9 ve 0 tuşları) |
 | Maç sonu | "SKIP" → birkaç sn sonra "CONTINUE" | Kayıpta sandık yok |
 
-Butonlardaki yazıların bir kısmı Türkçe ("Hadi bak!", "Teklifi incele"); README "oyun İngilizce olmalı" diyor ama
-teklif pencereleri yerel dilde geliyor. **Metne dayalı (OCR) tespitin bir kırılganlığı daha.**
+Teklif pencerelerinde Türkçe butonlar görüldü ("Hadi bak!", "Teklifi incele"). Cihazın birincil dili zaten `en-US`
+idi ama ikinci dil olarak `tr-TR` tanımlıydı; 2026-11-21'de kaldırıldı (`settings put system system_locales en-US`
++ yeniden başlatma, etkin yapılandırma artık yalnızca `en-rUS`). Teklifler yine Türkçe gelirse kaynak hesap/sunucu
+tarafıdır; şablon tabanlı tespit bundan etkilenmez.
 
 ### 2.2 Maç içi
 
@@ -88,10 +90,11 @@ Maç içi (1300,110) ve (1490,110) güçlendirmeleri, ölüm ekranında "RESURRE
 
 ### 2.4 Rakip isimleri
 
-Düşük kupalı listede isimlerin çoğu Vietnamca karakterli rastgele hesaplar. Tesseract (eng) bunları bozuk okuyor;
-`player_data.json`'ın 3.9 MB olmasının bir sebebi muhtemelen aynı oyuncunun farklı okunuşlarla tekrar tekrar
-kaydedilmesi. **Öneri:** isim bölgesinin görüntü özetini (perceptual hash) anahtar olarak kullanmak. OCR yok,
-dil bağımsız, ~1 ms.
+Düşük kupalı listede isimlerin çoğu Vietnamca karakterli. Kullanıcının saha gözlemi: Tesseract bunları doğru
+okuyamasa da **tutarlı** okuyor; yanlış eşleşme ya da eşleşmeme görülmemiş. Yani doğruluk sorunu yok, yalnızca
+maliyet var (isim başına ~295 ms, ekranda 6 isim → ~1.8 sn). **Öneri (verimlilik için):** isim bölgesinin
+görüntü özetini (perceptual hash) anahtar yapmak, ~1 ms. Geçişte eski JSON kayıtları atılabilir (15 dk'lık
+"aktif" işaretleri zaten kısa ömürlü).
 
 ---
 
@@ -170,9 +173,13 @@ Tanınmayan kareler tekilleştirilip `unknown/`'a kaydedilir; ben etiketleyip im
 ### 5.1 Bilinenler (kullanıcıdan)
 - Hazineler binalar yıkılınca **yola, binanın önüne** düşüyor; ne zaman düşeceği belli değil, **hareket etmiyorlar**.
 - **Kral üzerinden geçince** toplanıyor (dokunmak gerekmiyor).
-- Değerli olan genelde elmas, ama kullanıcı hangi türleri toplayacağını **kendisi seçebilmeli**.
+- Düşen türler: **elmas, tokenler (~7 çeşit), inciler, mamalar, rünler (4 çeşit)**. Değerli olan genelde elmas, ama
+  kullanıcı hangi türleri toplayacağını **kendisi seçebilmeli** → ~14 sınıflı bir tespit problemi.
 - Hazine maçları 600 kupada değil; oyuncunun kupası düşük tutulur (~2000) ve rakip ona yakın olur.
 - Asıl hedef: kullanıcının **favorilere kaydettiği hazine üsleri** (çok kuleli, kolay).
+- Favorilere giriş: HOME'da saldırı butonunun üstündeki 5 butondan sağ üstten 2.si (iki gülümseyen yüz, yeşil
+  etiket, oyun kolu ikonu) → açılan menüde "Favorites".
+- Hazine maçlarında **birlikler kullanılabilir**.
 
 ### 5.2 Neden zor ve nasıl kolaylaşıyor
 Asıl zorluk tespit değil, **kralı yolda yürütmek**: hazineler yolun üstünde olduğuna göre yolu baştan sona yürüyen
@@ -191,7 +198,7 @@ kral çoğunu zaten toplar. Seçicilik ancak sapma/bekleme gerektiğinde devreye
 5. **Akış farkı:** HOME → favoriler → üs seç → saldır. Birlik/büyü çağrıları tuşla. Maç sonu aynı.
 6. **Değerlendirme:** aç/kapa A/B; ölçüt saat başı elmas (ve seçilen diğer türler).
 
-### 5.3 Açık sorular
-1. Favori üsler listesi oyunda nerede açılıyor? (Leaderboard sekmelerinde ve "Prepare for Battle"da yok.)
-2. Hazine maçında birlikler de kullanılacak mı, yoksa kral tek başına mı yürüyecek?
-3. Düşen hazine türleri neler (elmas dışında)? Bir hazine maçını ekran kaydıyla izlersem kataloğu ben çıkarırım.
+### 5.3 Katalog nasıl çıkarılacak
+Birkaç hazine maçı `screenrecord` ile kaydedilir (45 fps). Kareleri tek tek incelemek yerine kod, ardışık kareler
+arasında yeni beliren ve sonra yerinde duran nesneleri (hazineler hareketsiz) bulur; yalnızca o anların karelerini
+ve kırpıntılarını inceleyip türlere ayırırım. Her tür için örnek kırpıntılar `En_Templates/treasure_*` olur.
