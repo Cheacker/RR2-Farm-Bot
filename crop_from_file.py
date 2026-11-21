@@ -2,15 +2,14 @@
 Offline template cropper — crops from a saved screenshot file instead of a
 live device capture. recrop.py always grabs a fresh screenshot from the
 emulator, so it can't be used to crop something you already captured earlier
-(e.g. captured_inactives/*.png) without also touching a running bot/emulator.
-This tool never talks to ADB at all, so it's safe to use any time, even
-while the bot is running.
+without also touching a running bot/emulator. This tool never talks to ADB
+at all, so it's safe to use any time, even while the bot is running.
 
 Usage:
   python crop_from_file.py <screenshot_path> <template_name>
 
 Example:
-  python crop_from_file.py captured_inactives/20260816_120501_unrecognized.png btn_attack_start_gray_2
+  python crop_from_file.py fail_debug/20260816_120501_trophy_menu_stuck.png btn_attack_start_gray_2
 """
 import cv2
 import os

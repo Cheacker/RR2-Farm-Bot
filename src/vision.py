@@ -35,34 +35,54 @@ class VisionInterpreter:
                 self.templates[name] = cv2.imread(path)
         print(f"[VISION] {len(self.templates)} templates loaded: {self.template_dir}")
 
-    def find_template(self, screen, template_name, threshold=0.98):
-        """Return center (x, y) of the best match, or None if below threshold."""
+    def find_template(self, screen, template_name, threshold=0.98, region=None):
+        """Return center (x, y) of the best match, or None if below threshold.
+        region=(x1, y1, x2, y2) constrains the search to that rectangle."""
         if template_name not in self.templates or screen is None:
             return None
         template = self.templates[template_name]
         if template is None:
             return None
 
-        res = cv2.matchTemplate(screen, template, cv2.TM_CCOEFF_NORMED)
+        search_area = screen
+        ox, oy = 0, 0
+        if region:
+            x1, y1, x2, y2 = region
+            search_area = screen[y1:y2, x1:x2]
+            ox, oy = x1, y1
+            if search_area.size == 0:
+                return None
+
+        res = cv2.matchTemplate(search_area, template, cv2.TM_CCOEFF_NORMED)
         _, max_val, _, max_loc = cv2.minMaxLoc(res)
 
         if max_val >= threshold:
             h, w = template.shape[:2]
-            center_x = max_loc[0] + w // 2
-            center_y = max_loc[1] + h // 2
+            center_x = ox + max_loc[0] + w // 2
+            center_y = oy + max_loc[1] + h // 2
             print(f"[VISION] {template_name} found (max={max_val:.3f}, threshold={threshold})")
             return (center_x, center_y)
         if template_name not in SILENT_ON_MISS:
             print(f"[VISION] {template_name} not found (max={max_val:.3f}, threshold={threshold})")
         return None
 
-    def find_multiple_templates(self, screen, template_name, threshold=0.99):
-        """Return list of (x, y) for all non-overlapping matches above threshold."""
+    def find_multiple_templates(self, screen, template_name, threshold=0.99, region=None):
+        """Return list of (x, y) for all non-overlapping matches above threshold.
+        region=(x1, y1, x2, y2) constrains the search to that rectangle."""
         if template_name not in self.templates or screen is None:
             return []
         template = self.templates[template_name]
 
-        res = cv2.matchTemplate(screen, template, cv2.TM_CCOEFF_NORMED)
+        search_area = screen
+        ox, oy = 0, 0
+        if region:
+            x1, y1, x2, y2 = region
+            search_area = screen[y1:y2, x1:x2]
+            ox, oy = x1, y1
+            if search_area.size == 0:
+                return []
+
+        res = cv2.matchTemplate(search_area, template, cv2.TM_CCOEFF_NORMED)
         _, max_val, _, _ = cv2.minMaxLoc(res)
         locs = np.where(res >= threshold)
 
@@ -70,7 +90,7 @@ class VisionInterpreter:
         centers = []
         for pt in zip(*locs[::-1]):
             val = float(res[pt[1], pt[0]])
-            centers.append((pt[0] + w // 2, pt[1] + h // 2, val))
+            centers.append((ox + pt[0] + w // 2, oy + pt[1] + h // 2, val))
 
         if not centers:
             print(f"[VISION] {template_name} (multi) not found (max={max_val:.3f}, threshold={threshold})")
@@ -117,8 +137,12 @@ class VisionInterpreter:
         name = pytesseract.image_to_string(thresh, config="--psm 7 --oem 3").strip()
         return name
 
-    def read_region_text(self, screen, x1: int, y1: int, x2: int, y2: int) -> str:
-        """OCR a rectangular region and return the detected text (lowercase), or empty string."""
+    def read_region_text(self, screen, x1: int, y1: int, x2: int, y2: int, psm: int = 7) -> str:
+        """OCR a rectangular region and return the detected text (uppercase), or empty string.
+        Uppercase on both the OCR output and the caller's comparison strings avoids
+        case-mismatch flakiness (e.g. OCR reading a title-case button as "Search"
+        while the caller checks for "search").
+        psm=7 is for single-line text; psm=6 is recommended for multi-line blocks."""
         if screen is None:
             return ""
         region = screen[y1:y2, x1:x2]
@@ -127,6 +151,8 @@ class VisionInterpreter:
         gray = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)
         upscaled = cv2.resize(gray, (0, 0), fx=2, fy=2, interpolation=cv2.INTER_LINEAR)
         _, thresh = cv2.threshold(upscaled, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        raw = pytesseract.image_to_string(thresh, config="--psm 7 --oem 3").strip()
-        return raw.lower()
+        raw = pytesseract.image_to_string(thresh, config=f"--psm {psm} --oem 3").strip()
+        if not raw:
+            raw = pytesseract.image_to_string(upscaled, config=f"--psm {psm} --oem 3").strip()
+        return raw.upper()
 

@@ -12,9 +12,6 @@ from player_db import PlayerDB
 FAIL_DEBUG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "fail_debug")
 os.makedirs(FAIL_DEBUG_DIR, exist_ok=True)
 
-CAPTURED_INACTIVES_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "captured_inactives")
-os.makedirs(CAPTURED_INACTIVES_DIR, exist_ok=True)
-
 # Per-hour debug log: cleared at the start of every bot run (not accumulated
 # across runs) -- meant for "what happened during this specific session",
 # not a long-term history file.
@@ -54,25 +51,57 @@ def find_ldconsole():
     return None
 
 # ── Coordinates ──────────────────────────────────────────────────────────────
-TROPHY_COORDS       = (1546, 114)     # set with get_coords.py
-COLLECT_ALL_RESOURCES  = (60, 506)     # set with get_coords.py
-BLUE_SEARCH_COORDS  = (1436, 213)
-ARCHER_COORDS      = (200, 800)
-SECOND_TROOP_SLOT_COORDS      = (240, 800)
-ATTACK_TEXT_REGION  = (1180, 744, 1305, 777)  # OCR region for yellow "ATTACK!" text
-ATTACK_BTN_COORDS  = (1242, 760)              # center of the yellow attack button
-MINUS_LEFT_COORDS  = (810, 226)
-MINUS_RIGHT_COORDS = (1084, 226)
-PLUS_LEFT_COORDS   = (985, 229)
-PLUS_RIGHT_COORDS  = (1258, 226)
-IN_GAME_TAP_COORDS = (10, 10) # (1130, 274) for real tap on map
-GEAR_SET_1_COORDS  = (226, 818)
-GEAR_SET_2_COORDS  = (298, 820)
-GEAR_SET_3_COORDS  = (366, 818)
-VIDEO_CLOSE_COORDS = (1522, 94)
-SHOP_COORDS        = (1540, 508)
-GREEN_BACK_COORDS  = (1430, 85)    # back out of attack prep / loading screen
-SCROLL_CONFIRM_COORDS = (896, 785) # ranked-list confirm after scroll — on the
+# All search regions below are padded 10px in every direction beyond the tight
+# crop around their target — gives template/OCR matching slack for the target
+# shifting slightly frame-to-frame without requiring a re-crop.
+TROPHY_REGION          = (1490, 76, 1600, 183)   # template search region for icon_trophy
+TROPHY_COORDS          = (1545, 129)             # center of TROPHY_REGION
+FORGE_ALL_REGION       = (108, 550, 244, 676)    # template search region for icon_forge
+COLLECT_ALL_RESOURCES  = (60, 506)               # set with get_coords.py
+BLUE_SEARCH_COORDS     = (1436, 213)
+SEARCH_TEXT_REGION     = (604, 756, 1002, 867)   # OCR region for yellow "SEARCH" text
+SEARCH_BTN_COORDS      = (803, 811)              # center of yellow search button
+ARCHER_REGION          = (8, 615, 583, 832)      # template search region for btn_archer / btn_archer_boosted
+ARCHER_COORDS          = (200, 800)
+SECOND_TROOP_SLOT_COORDS = (240, 800)
+ATTACK_TEXT_REGION     = (1170, 734, 1315, 787)  # OCR region for yellow "ATTACK!" text
+ATTACK_BTN_COORDS      = (1242, 760)             # center of the yellow attack button
+ATTACK_GRAY_REGION     = (1055, 714, 1423, 859)  # template search region for btn_attack_start_gray
+INACTIVE_PLAYER_REGION = (924, 396, 1211, 522)   # OCR region for "this player is inactive" (2 lines)
+BIG_COLLECT_TEXT_REGION = (906, 591, 1096, 680)  # OCR region for big "COLLECT" button
+BIG_COLLECT_BTN_COORDS = (1001, 635)            # center of the big collect button
+CONTINUE_TEXT_REGION   = (927, 718, 1332, 856)   # OCR region for "CONTINUE"
+CONTINUE_BTN_COORDS    = (1129, 787)             # center of continue button
+GIVE_UP_TEXT_REGION    = (927, 718, 1332, 856)   # OCR region for "GIVE UP"
+GIVE_UP_BTN_COORDS     = (1129, 787)             # center of give up button
+TAKE_ME_BACK_REGION    = (599, 442, 1028, 563)   # OCR region for "Take me back!"
+TAKE_ME_BACK_COORDS    = (813, 502)              # center of take me back button
+SELL_TEXT_REGION       = (392, 595, 811, 711)    # OCR region for "SELL"
+SELL_BTN_COORDS        = (601, 653)              # center of sell button
+COF_MELT_REGION        = (426, 286, 624, 479)    # template search region for COF btn_melt
+COF_MELT_COORDS        = (525, 382)              # center of COF melt button
+CHEST_REGIONS = {
+    1: (240, 220, 490, 440),
+    2: (660, 220, 930, 440),
+    3: (1070, 220, 1360, 440),
+    4: (240, 590, 490, 850),
+    5: (660, 590, 930, 850),
+    6: (1070, 590, 1360, 850),
+}
+MINUS_LEFT_COORDS      = (810, 226)
+MINUS_RIGHT_COORDS     = (1084, 226)
+PLUS_LEFT_COORDS       = (985, 229)
+PLUS_RIGHT_COORDS      = (1258, 226)
+IN_GAME_TAP_COORDS     = (1130, 274)
+GEAR_SET_1_COORDS      = (226, 818)
+GEAR_SET_2_COORDS      = (298, 820)
+GEAR_SET_3_COORDS      = (366, 818)
+BTN_CLOSE_REGION       = (1451, 22, 1594, 155)   # template search region for btn_close
+VIDEO_CLOSE_COORDS     = (1522, 94)
+SHOP_COORDS            = (1540, 508)
+GREEN_BACK_REGION      = (1334, 23, 1471, 156)   # template search region for btn_green_back
+GREEN_BACK_COORDS      = (1402, 89)              # center of green back button
+SCROLL_CONFIRM_COORDS  = (896, 785) # ranked-list confirm after scroll — on the
                                    # attack-prep screen this is "New Opponent",
                                    # so never tap it without confirming the screen
 
@@ -81,7 +110,7 @@ SCROLL_CONFIRM_COORDS = (896, 785) # ranked-list confirm after scroll — on the
 # and the home-return coordinate, and get_coords.py again (or just eyeball the
 # region) for the OCR box around your own trophy count. Until all four are set,
 # drop mode falls back to the old behavior: a plain timeout + full game restart.
-OWN_TROPHY_REGION    = (1413, 112, 1504, 150)  # (x1, y1, x2, y2) OCR region showing your own trophy count
+OWN_TROPHY_REGION    = (1403, 102, 1514, 160)  # (x1, y1, x2, y2) OCR region showing your own trophy count
 DROP_BUTTON_1_COORDS = (72, 266)  # tapped first, 2s after the match starts
 DROP_BUTTON_2_COORDS = (605, 484)  # tapped right after button 1
 DROP_HOME_COORDS     = (1114, 788)  # final tap that returns to HOME after dropping
@@ -101,7 +130,7 @@ class State:
 
 class RR2Bot:
     def __init__(self, port=21503, template_dir=None, trophy_filter=600, melt_threshold=1_000_000,
-                 drop_trophies=False, ld_index=0, ldconsole=None, capture_inactives=False):
+                 drop_trophies=False, ld_index=0, ldconsole=None):
         # Skip ADBController's own connect-on-init: connecting before the startup
         # restart even runs is wasted work whose result gets thrown away the
         # instant the restart happens -- only try after the restart completes.
@@ -158,8 +187,6 @@ class RR2Bot:
         self._game_load_miss    = 0
         self._screen_none_count = 0
         self._anchor_miss_streak = 0
-        self._capture_inactives  = capture_inactives
-        self._capture_wait_start = 0
         self._scroll_no_progress = 0
         self._scroll_attempts    = 0
         self.db = PlayerDB()
@@ -174,7 +201,7 @@ class RR2Bot:
         self._session_log_hour_matches    = 0
         self._session_log_hour_loop_sum   = 0.0
         self._session_log_hour_pearl_start = None
-
+        
     # ── Emulator connection ───────────────────────────────────────────────────
     def _startup_restart_ldplayer(self):
         """Always do one clean LDPlayer restart at bot startup, every run — even
@@ -269,11 +296,7 @@ class RR2Bot:
                 if   self.state == State.HOME:               self.handle_home(screen)
                 elif self.state == State.TROPHY_MENU:        self.handle_trophy_menu(screen)
                 elif self.state == State.FILTERED_RANKS:     self.handle_filtered_ranks(screen)
-                elif self.state == State.ATTACK_PREP:
-                    if self._capture_inactives:
-                        self.handle_capture_inactives(screen)
-                    else:
-                        self.handle_attack_prep(screen)
+                elif self.state == State.ATTACK_PREP:     self.handle_attack_prep(screen)
                 elif self.state == State.GAME_LOAD:          self.handle_game_load(screen)
                 elif self.state == State.GOING_BACK:         self.handle_going_back(screen)
                 elif self.state == State.IN_GAME:            self.handle_in_game(screen)
@@ -308,8 +331,9 @@ class RR2Bot:
 
     # ── HOME ──────────────────────────────────────────────────────────────────
     def handle_home(self, screen):
-        print("[HOME] Searching for forge icon...")
-        pos = self.vision.find_template(screen, "icon_forge", 0.90)
+        print("[HOME] Searching for forge / trophy icon...")
+        pos = (self.vision.find_template(screen, "icon_forge", 0.90, region=FORGE_ALL_REGION)
+               or self.vision.find_template(screen, "icon_trophy", 0.85, region=TROPHY_REGION))
         if pos:
             self._trophy_miss_count = 0
             self._anchor_miss_streak = 0
@@ -325,7 +349,7 @@ class RR2Bot:
                 print(f"[HOME] Match #{self._match_count} — collecting all resources...")
                 self.adb.tap(*COLLECT_ALL_RESOURCES)
                 time.sleep(0.5)
-            print("[HOME] Forge icon found, tapping trophy...")
+            print("[HOME] Forge / Trophy icon found, tapping trophy...")
             self.adb.tap(*TROPHY_COORDS)
             self.state = State.TROPHY_MENU
             time.sleep(0.5)
@@ -347,10 +371,9 @@ class RR2Bot:
                 # 'Connected another device' popup uses the same button/template as
                 # GAME_LOAD's btn_take_me_back — checked here too since this popup can
                 # also interrupt at HOME.
-                take_me_back = self.vision.find_template(screen, "btn_take_me_back", threshold=0.85)
-                if take_me_back:
+                if self._has_take_me_back(screen):
                     print("[HOME] 'Connected another device' popup detected — dismissing...")
-                    self.adb.tap(take_me_back[0], take_me_back[1])
+                    self.adb.tap(*TAKE_ME_BACK_COORDS)
                     time.sleep(RESTART_GAME_WAIT)
                     self._trophy_miss_count = 0
                     self._anchor_miss_streak = 0
@@ -368,13 +391,13 @@ class RR2Bot:
                 time.sleep(3.5)
                 self.adb.tap(1524, 86)
 
-            close = self.vision.find_template(screen, "btn_close", threshold=0.57)
+            close = self.vision.find_template(screen, "btn_close", threshold=0.57, region=BTN_CLOSE_REGION)
             if close:
                 print("[HOME] Pressing btn_close...")
                 self.adb.tap(close[0], close[1])
                 time.sleep(0.5)
 
-                close = self.vision.find_template(screen, "btn_close", threshold=0.57)
+                close = self.vision.find_template(screen, "btn_close", threshold=0.57, region=BTN_CLOSE_REGION)
                 if close:
                     print("[HOME] Pressing btn_close...")
                     self.adb.tap(close[0], close[1])
@@ -385,10 +408,10 @@ class RR2Bot:
                 time.sleep(0.1)
 
             if self._trophy_miss_count % 10 == 0:
-                btn_big_collect = self.vision.find_template(screen, "btn_big_collect", threshold=0.80)
-                if btn_big_collect:
-                    print("[HOME] btn_big_collect found, tapping...")
-                    self.adb.tap(btn_big_collect[0], btn_big_collect[1])
+                collect_text = self.vision.read_region_text(screen, *BIG_COLLECT_TEXT_REGION)
+                if "COLLECT" in collect_text:
+                    print("[HOME] Big collect detected (OCR), tapping...")
+                    self.adb.tap(*BIG_COLLECT_BTN_COORDS)
                     time.sleep(1)
 
                 league = self.vision.find_template(screen, "btn_collect_league", threshold=0.80)
@@ -425,21 +448,22 @@ class RR2Bot:
             time.sleep(RESTART_GAME_WAIT)
             return State.HOME
 
-        if (self.vision.find_template(screen, "icon_forge", threshold=0.90)
-                or self.vision.find_template(screen, "btn_take_me_back", threshold=0.85)):
+        if (self.vision.find_template(screen, "icon_forge", threshold=0.90, region=FORGE_ALL_REGION)
+                or self.vision.find_template(screen, "icon_trophy", threshold=0.85, region=TROPHY_REGION)
+                or self._has_take_me_back(screen)):
             return State.HOME
-        if self.vision.find_template(screen, "btn_start_search", threshold=0.80):
+        if self._has_search_button(screen):
             return State.TROPHY_MENU
         if self.vision.find_multiple_templates(screen, "area_top_opponent", threshold=0.90):
             return State.FILTERED_RANKS
         if self._on_attack_prep_screen(screen):
             return State.ATTACK_PREP
-        if (self.vision.find_template(screen, "btn_archer", threshold=0.85)
-                or self.vision.find_template(screen, "btn_archer_boosted", threshold=0.85)
-                or self.vision.find_template(screen, "btn_take_me_back", threshold=0.85)):
+        if (self.vision.find_template(screen, "btn_archer", threshold=0.85, region=ARCHER_REGION)
+                or self.vision.find_template(screen, "btn_archer_boosted", threshold=0.85, region=ARCHER_REGION)
+                or self._has_take_me_back(screen)):
             return State.GAME_LOAD
-        if (self.vision.find_template(screen, "btn_give_up", threshold=0.70)
-                or self.vision.find_template(screen, "btn_sell", threshold=0.70)
+        if (self._has_give_up_button(screen)
+                or self._has_sell_button(screen)
                 or self._find_chests(screen)):
             return State.CHAMBER_OF_FORTUNE
         return None
@@ -450,16 +474,72 @@ class RR2Bot:
         if screen is None:
             return False
         text = self.vision.read_region_text(screen, *ATTACK_TEXT_REGION)
-        return "attack" in text
+        return "ATTACK" in text
+
+    def _is_player_inactive(self, screen):
+        """Check if 'this player is inactive' message is present in INACTIVE_PLAYER_REGION (2 lines)."""
+        if screen is None:
+            return False
+        text = self.vision.read_region_text(screen, *INACTIVE_PLAYER_REGION, psm=6)
+        if "INACTIVE" in text:
+            return True
+        text_alt = self.vision.read_region_text(screen, *INACTIVE_PLAYER_REGION, psm=11)
+        return "INACTIVE" in text_alt
 
     def _on_attack_prep_screen(self, screen):
-        """True if either the yellow or gray attack button is visible."""
+        """True if either the yellow or gray attack button, or inactive player message is visible."""
         if screen is None:
             return False
         return bool(
             self._has_yellow_attack(screen)
-            or self.vision.find_template(screen, "btn_attack_start_gray", threshold=0.85)
+            or self.vision.find_template(screen, "btn_attack_start_gray", threshold=0.85, region=ATTACK_GRAY_REGION)
+            or self._is_player_inactive(screen)
         )
+
+    def _has_search_button(self, screen):
+        """OCR the search button region — True if 'search' text is visible."""
+        if screen is None:
+            return False
+        text = self.vision.read_region_text(screen, *SEARCH_TEXT_REGION)
+        if "SEARCH" in text:
+            return True
+        return bool(self.vision.find_template(screen, "btn_start_search", threshold=0.80, region=SEARCH_TEXT_REGION))
+
+    def _has_continue_button(self, screen):
+        """OCR the continue button region — True if 'continue' text is visible."""
+        if screen is None:
+            return False
+        text = self.vision.read_region_text(screen, *CONTINUE_TEXT_REGION)
+        if "CONTINUE" in text:
+            return True
+        return bool(self.vision.find_template(screen, "btn_continue", threshold=0.95, region=CONTINUE_TEXT_REGION))
+
+    def _has_give_up_button(self, screen):
+        """OCR the give up button region — True if 'give up' text is visible."""
+        if screen is None:
+            return False
+        text = self.vision.read_region_text(screen, *GIVE_UP_TEXT_REGION)
+        if "GIVE" in text or "UP" in text:
+            return True
+        return bool(self.vision.find_template(screen, "btn_give_up", threshold=0.70, region=GIVE_UP_TEXT_REGION))
+
+    def _has_take_me_back(self, screen):
+        """OCR the 'Take me back!' region — True if 'take me' or 'back' is visible."""
+        if screen is None:
+            return False
+        text = self.vision.read_region_text(screen, *TAKE_ME_BACK_REGION)
+        if "TAKE ME" in text or "BACK" in text:
+            return True
+        return bool(self.vision.find_template(screen, "btn_take_me_back", threshold=0.85, region=TAKE_ME_BACK_REGION))
+
+    def _has_sell_button(self, screen):
+        """OCR the sell button region — True if 'sell' is visible."""
+        if screen is None:
+            return False
+        text = self.vision.read_region_text(screen, *SELL_TEXT_REGION)
+        if "SELL" in text:
+            return True
+        return bool(self.vision.find_template(screen, "btn_sell", threshold=0.70, region=SELL_TEXT_REGION))
 
     # ── Helper: leave attack prep ─────────────────────────────────────────────
     def _leave_attack_prep(self, reason, permanent=False):
@@ -498,7 +578,7 @@ class RR2Bot:
             print(f"[SCROLL] {self._scroll_attempts} scroll attempts without finding opponents — "
                   f"checking for a blocking popup instead of scrolling again...")
             f = self.adb.current_screen()
-            close = self.vision.find_template(f, "btn_close", threshold=0.57) if f is not None else None
+            close = self.vision.find_template(f, "btn_close", threshold=0.57, region=BTN_CLOSE_REGION) if f is not None else None
             if close:
                 print("[SCROLL] btn_close found — tapping to dismiss.")
                 self.adb.tap(close[0], close[1])
@@ -568,8 +648,8 @@ class RR2Bot:
         # ~0.84 (stable across frames, so it's a genuine match, not noise), likely due
         # to rendering differences from the MEmu-captured source image. Ideally
         # recapture btn_start_search via recrop.py (option 2) on LDPlayer directly.
-        yellow = self.vision.find_template(screen, "btn_start_search", threshold=0.80)
-        if yellow:
+        has_search = self._has_search_button(screen)
+        if has_search:
             self._trophy_menu_miss = 0
             self._anchor_miss_streak = 0
         
@@ -611,7 +691,7 @@ class RR2Bot:
                         time.sleep(0.15)
 
             print("[TROPHY_MENU] Search button found, adjusting filters then tapping...")
-            self.adb.tap(yellow[0], yellow[1])
+            self.adb.tap(*SEARCH_BTN_COORDS)
             time.sleep(1)
             self.state = State.FILTERED_RANKS
             return
@@ -737,41 +817,6 @@ class RR2Bot:
             self._anchor_miss_streak += 1
             print("[ATTACK_PREP] Waiting for attack button...")
 
-    # ── ATTACK_PREP (capture-inactives mode) ──────────────────────────────────
-    def handle_capture_inactives(self, screen):
-        """Dedicated collection mode (--capture-inactives): stays on the attack-prep
-        screen forever, using the static 'New Opponent' button (SCROLL_CONFIRM_COORDS)
-        to reroll. An attackable (yellow) or already-recognized gray opponent gets
-        rerolled immediately; an opponent where neither renders within 10s is the
-        harder-to-find case — its screenshot is saved to CAPTURED_INACTIVES_DIR for
-        you to crop offline later with crop_from_file.py, which doesn't touch the
-        live device and so can't disrupt this loop while it keeps running."""
-        yellow = self._has_yellow_attack(screen)
-        gray   = self.vision.find_template(screen, "btn_attack_start_gray", threshold=0.85)
-        if yellow:
-            print("[CAPTURE_INACTIVES] Attackable — rerolling for another opponent...")
-            self.adb.tap(*SCROLL_CONFIRM_COORDS)
-            self._capture_wait_start = time.time()
-            time.sleep(0.5)
-            return
-        if gray:
-            print("[CAPTURE_INACTIVES] Gray button already recognized — rerolling for more...")
-            self.adb.tap(*SCROLL_CONFIRM_COORDS)
-            self._capture_wait_start = time.time()
-            time.sleep(0.5)
-            return
-        if self._capture_wait_start == 0:
-            self._capture_wait_start = time.time()
-            return
-        if time.time() - self._capture_wait_start >= 15:
-            ts   = time.strftime('%Y%m%d_%H%M%S')
-            path = os.path.join(CAPTURED_INACTIVES_DIR, f'{ts}_unrecognized_attack_prep.png')
-            cv2.imwrite(path, screen)
-            print(f"[CAPTURE_INACTIVES] Neither button recognized for 10s — saved {path}")
-            self.adb.tap(*SCROLL_CONFIRM_COORDS)
-            self._capture_wait_start = time.time()
-            time.sleep(0.5)
-
     # ── GAME_LOAD ─────────────────────────────────────────────────────────────
     def handle_game_load(self, screen):
         time.sleep(0.1)
@@ -813,8 +858,7 @@ class RR2Bot:
             print("[GAME_LOAD] Shop/video popup still visible after close attempt — retrying via miss counter.")
             # Fall through to the miss counter below instead of returning — the existing
             # 15-miss restart-game safety net will recover if this keeps failing.
-        go_back = self.vision.find_template(screen, "btn_take_me_back", threshold=0.9)
-        if go_back:
+        if self._has_take_me_back(screen):
             self._game_load_miss = 0
             self._anchor_miss_streak = 0
             self._skip_top += 1
@@ -823,13 +867,13 @@ class RR2Bot:
                 print(f"[GAME_LOAD] Active player! '{self._current_target}' marked active, skip={self._skip_top}...")
             else:
                 print(f"[GAME_LOAD] Active player! skip={self._skip_top}...")
-            self.adb.tap(go_back[0], go_back[1])
+            self.adb.tap(*TAKE_ME_BACK_COORDS)
             self.state = State.GOING_BACK
             time.sleep(0.5)
             return
         time.sleep(0.1)
-        archer = (self.vision.find_template(screen, "btn_archer", threshold=0.9)
-                  or self.vision.find_template(screen, "btn_archer_boosted", threshold=0.9))
+        archer = (self.vision.find_template(screen, "btn_archer", threshold=0.9, region=ARCHER_REGION)
+                  or self.vision.find_template(screen, "btn_archer_boosted", threshold=0.9, region=ARCHER_REGION))
         if archer:
             self._game_load_miss = 0
             self._anchor_miss_streak = 0
@@ -918,10 +962,9 @@ class RR2Bot:
 
         if screen is not None and now - self._last_end_check >= 3:
             self._last_end_check = now
-            continue_pos = self.vision.find_template(screen, "btn_continue", threshold=0.95)
-            if continue_pos:
-                print("[IN_GAME] Match ended, going to result screen...")
-                self.adb.tap(continue_pos[0], continue_pos[1])
+            if self._has_continue_button(screen):
+                print("[IN_GAME] Match ended (CONTINUE detected), going to result screen...")
+                self.adb.tap(*CONTINUE_BTN_COORDS)
                 self.state = State.CHAMBER_OF_FORTUNE
                 time.sleep(1.25)
 
@@ -998,7 +1041,8 @@ class RR2Bot:
     def _find_chests(self, f) -> list:
         positions = []
         for i in range(1, 7):
-            pos = self.vision.find_template(f, f"chest_{i}", threshold=0.7)
+            region = CHEST_REGIONS.get(i)
+            pos = self.vision.find_template(f, f"chest_{i}", threshold=0.7, region=region)
             if pos:
                 positions.append(pos)
         return positions
@@ -1027,24 +1071,22 @@ class RR2Bot:
             if f is None:
                 continue
 
-            pes = self.vision.find_template(f, "btn_give_up", threshold=0.70)
-            if pes:
-                print(f"[COF] Give up (1 buttons), tapping leftmost: {pes}")
-                self.adb.tap(pes[0], pes[1])
+            if self._has_give_up_button(f):
+                print(f"[COF] Give up button detected, tapping...")
+                self.adb.tap(*GIVE_UP_BTN_COORDS)
                 time.sleep(2.25)
                 self._cof_tap_home()
                 return
 
-            sell = self.vision.find_template(f, "btn_sell", threshold=0.70)
-            if sell:
-                melt = self.vision.find_template(f, "btn_melt", threshold=0.92)
+            if self._has_sell_button(f):
+                melt = self.vision.find_template(f, "btn_melt", threshold=0.92, region=COF_MELT_REGION)
                 gold_ref = self._gold_last if self._gold_last is not None else self._gold_start
                 if melt and (gold_ref is None or gold_ref > self._melt_threshold):
                     print(f"[COF] Melt (gold={f'{gold_ref:,}' if gold_ref is not None else '?'}): {melt}")
                     self.adb.tap(melt[0], melt[1])
                 else:
-                    print(f"[COF] Sell: {sell}")
-                    self.adb.tap(sell[0], sell[1])
+                    print(f"[COF] Sell detected, tapping...")
+                    self.adb.tap(*SELL_BTN_COORDS)
                 missed_chests = 0
                 continue
 
@@ -1077,24 +1119,22 @@ class RR2Bot:
             if f is None:
                 continue
 
-            pes = self.vision.find_template(f, "btn_give_up", threshold=0.70)
-            if pes:
-                print(f"[COF] Give up (1 buttons), tapping leftmost: {pes}")
-                self.adb.tap(pes[0], pes[1])
+            if self._has_give_up_button(f):
+                print(f"[COF] Give up button detected, tapping...")
+                self.adb.tap(*GIVE_UP_BTN_COORDS)
                 time.sleep(2.25)
                 self._cof_tap_home()
                 return
 
-            sell = self.vision.find_template(f, "btn_sell", threshold=0.70)
-            if sell:
-                melt = self.vision.find_template(f, "btn_melt", threshold=0.70)
+            if self._has_sell_button(f):
+                melt = self.vision.find_template(f, "btn_melt", threshold=0.70, region=COF_MELT_REGION)
                 gold_ref = self._gold_last if self._gold_last is not None else self._gold_start
                 if melt and (gold_ref is None or gold_ref > self._melt_threshold):
                     print(f"[COF] Melt (gold={f'{gold_ref:,}' if gold_ref is not None else '?'}): {melt}")
                     self.adb.tap(melt[0], melt[1])
                 else:
-                    print(f"[COF] Sell: {sell}")
-                    self.adb.tap(sell[0], sell[1])
+                    print(f"[COF] Sell detected, tapping...")
+                    self.adb.tap(*SELL_BTN_COORDS)
                 time.sleep(2.25)
                 self._cof_tap_home()
                 return
@@ -1123,11 +1163,6 @@ if __name__ == "__main__":
                         help="Melt threshold — melt if gold above this, sell otherwise (100000-32000000, default: 1000000)")
     parser.add_argument("--drop-trophies", choices=["drop_yes", "drop_no"], default="drop_no",
                         help="Drop trophies mode: drop_yes ends match after 3s, drop_no after 180s (default: drop_no)")
-    parser.add_argument("--capture-inactives", action="store_true",
-                        help="Collection mode: stays on the attack-prep screen rerolling opponents "
-                             "forever via the static 'New Opponent' button, saving a screenshot to "
-                             "captured_inactives/ whenever neither the yellow nor gray attack button "
-                             "is recognized within 10s. Crop the results offline with crop_from_file.py.")
     args = parser.parse_args()
 
     # Validate ranges
@@ -1153,6 +1188,5 @@ if __name__ == "__main__":
           f"Trophy filter: {trophy_filter} | Melt threshold: {melt_threshold:,} | Drop trophies: {'YES' if drop_trophies else 'NO'}")
     bot = RR2Bot(port=port, template_dir=template_dir, trophy_filter=trophy_filter,
                  melt_threshold=melt_threshold, drop_trophies=drop_trophies,
-                 ld_index=args.ld_index, ldconsole=ldconsole,
-                 capture_inactives=args.capture_inactives)
+                 ld_index=args.ld_index, ldconsole=ldconsole)
     bot.loop()

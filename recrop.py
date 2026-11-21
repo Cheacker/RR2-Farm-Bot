@@ -13,19 +13,16 @@ import time
 PORT = 5555  # Change to match your emulator ADB port (LDPlayer's first instance is 5555)
 TRY_COUNT = 50
 SESSIONS = {
+    # NOTE: btn_start_search, btn_attack_start, btn_continue, btn_sell, btn_give_up,
+    # btn_take_me_back, and btn_big_collect are no longer captured here -- bot.py now
+    # detects those via OCR (text region reads), not template matching. Their existing
+    # .png files are left in En_Templates/ as fallbacks and are NOT deleted by this tool.
     "1":  ("Trophy icon (home screen)",                 ["icon_trophy"]),
-    "2":  ("Yellow search button",                      ["btn_start_search"]),
     "3":  ("Sword / attack icon (ranked list)",         ["area_top_opponent"]),
-    "4":  ("Attack start button (pre-match screen)",    ["btn_attack_start"]),
-    "5":  ("Continue button",                            ["btn_continue"]),
-    "6":  ("Sell button",                                ["btn_sell"]),
-    "7":  ("Give up button",                             ["btn_give_up"]),
     "8-13": ("Chests (6 separate crops)",                 ["chest_1","chest_2","chest_3","chest_4","chest_5","chest_6"]),
     "14": ("Archer button (appears when match starts)",     ["btn_archer"]),
-    "15": ("Take me back button (active player warning)",  ["btn_take_me_back"]),
     "16": ("Green back button",                             ["btn_green_back"]),
     "17": ("Collect button (appears on home screen for vouchers)",      ["btn_collect"]),
-    "18": ("Big collect button (appears after attack prep for breads)",     ["btn_big_collect"]),
     "19": ("Close / X button",                                              ["btn_close"]),
     "20": ("Forge All Button (Home Screen)",                                ["icon_forge"]),
     "21": ("Melt Button (COF)",                                         ["btn_melt"]),

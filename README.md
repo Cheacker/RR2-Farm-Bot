@@ -140,7 +140,6 @@ python "C:\Users\you\Documents\RR2-Farm-Bot\src\bot.py" --port 5554 --gold 10000
 | `--trophy-filter` | `600` | Target trophy range for the ranked search (400–4000). |
 | `--gold` | `1000000` | Melt threshold in Chamber of Fortune: melt if your gold is above this, sell otherwise (100,000–32,000,000). |
 | `--drop-trophies` | `drop_no` | `drop_yes` deliberately ends matches quickly to lower your trophies; `drop_no` plays normally. |
-| `--capture-inactives` | off | Data-collection mode — see [Troubleshooting](#capturing-more-unattackable-opponent-examples). |
 
 Examples:
 ```
@@ -190,17 +189,6 @@ Coordinates in `src/bot.py` (things like `TROPHY_COORDS`, `ARCHER_COORDS`, etc.,
 python get_coords.py
 ```
 Click where you want the coordinate, and it prints the `(x, y)` to the console.
-
-### Capturing more unattackable-opponent examples
-
-The bot detects an unattackable opponent by a gray (rather than yellow) attack button. If it's missing this too often, you can generate more example screenshots automatically:
-```
-python src\bot.py --capture-inactives
-```
-This mode parks on the attack-prep screen and rerolls forever, saving a screenshot to `captured_inactives/` any time neither the yellow nor gray attack button is confidently recognized for 10 seconds — these are exactly the cases the current template misses. Stop it (Ctrl+C) once you have a few, then crop the best one into a template **without touching the running emulator**:
-```
-python crop_from_file.py captured_inactives\<file>.png btn_attack_start_gray
-```
 
 ### `--drop-trophies` isn't doing anything
 
@@ -252,7 +240,6 @@ For anything not covered above — an unfamiliar error, a stack trace, the bot d
 | `crop_from_file.py` | Crop a template from an already-saved screenshot file (no live emulator needed). |
 | `player_data.json` | Persisted state — which players are active/unattackable. Not committed to git. |
 | `fail_debug/` | Screenshots saved automatically when the bot gets stuck, for diagnosing later. Not committed to git. |
-| `captured_inactives/` | Screenshots saved by `--capture-inactives` mode. Not committed to git. |
 
 ---
 

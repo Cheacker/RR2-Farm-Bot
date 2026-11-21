@@ -6,7 +6,6 @@ src/__pycache__/
 player_data.json
 session_log.txt
 fail_debug/
-captured_inactives/
 .zipmem/
 CLAUDE.md
 dev_tools/
