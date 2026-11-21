@@ -1,192 +1,197 @@
-# RR2 Farm Bot — İnceleme ve Yol Haritası (2026-11-21)
+# RR2 Farm Bot — İnceleme ve Yol Haritası
+
+İlk sürüm 2026-11-21. Aynı gün LDPlayer'da canlı keşifle güncellendi (oyun sürümü 12.9.0).
 
 Hedef: kısa farm döngüsü + **24 saatten uzun, gözetimsiz** çalışma + kullanıcının her ekranı elle
-test etmek zorunda kalmaması. Sonraki aşama: maç içinde düşen hazineleri seçerek toplamak.
+test etmek zorunda kalmaması. Bu sağlandıktan sonra: açılıp kapatılabilen, seçici **hazine toplama** modu.
 
 ---
 
-## 1. Mevcut durumun teşhisi
+## 1. Ölçümler
 
-### 1.1 Ölçülen maliyetler (bu makinede, 1600x900 kare)
+### 1.1 ADB ve görüntü işleme maliyetleri (LDPlayer 9, 1600x900)
 
-| İşlem | Süre |
-|---|---|
-| Tesseract OCR, tek bölge (`read_region_text`) | **~295 ms** (her çağrı ayrı `tesseract.exe` süreci açar) |
-| Tam ekran şablon eşleme (`find_template`, bölgesiz) | **~333 ms** |
-| Bölgeli şablon eşleme (`region=` verilmiş) | **~6 ms** |
-| PNG kodlama (PC tarafında) | ~90 ms; `screencap -p` cihazda aynı işi yapar ve üstüne aktarım ekler |
-
-Sonuç: işlemciyi yiyen şey ekran görüntüsünün kendisinden çok **durum tespiti için OCR ve bölgesiz
-şablon aramaları**. Örnekler:
-- `GAME_LOAD` her turda: `btn_video` tam ekran (~333 ms) + `_has_take_me_back` OCR (~295 ms, bazen 2 kez).
-- `_find_state` tek çağrıda 10+ OCR ve birkaç tam ekran arama yapabilir → birkaç saniye.
-- `IN_GAME` her 45 sn'de `_find_state` çalıştırıyor; maç içinde dokunma ritmini bozuyor.
-
-### 1.2 Mimari sorun: "varsayılan durum" + kör dokunuş
-
-Durum makinesi `self.state` ile **ekranın ne olduğunu varsayıyor**, ekran ona uymayınca kaçırma sayaçları
-(`_anchor_miss_streak`, `_no_opponent_count`, `_trophy_menu_miss`…) dolana kadar o ekranın sabit
-koordinatlarına basmaya devam ediyor. Commit geçmişinin büyük kısmı bu sınıfın yamaları:
-`_leave_attack_prep`, `_scroll_list` içindeki "New Opponent" koruması, RESYNC, `GOING_BACK`…
-Her yeni açılır pencere yeni bir yama ve yeni bir manuel test turu demek.
-
-### 1.3 `fail_debug/` ne söylüyor (22 kare)
-
-- **~8 kare "Break Time" ekranı**: *"You've been playing for a while, time for a break – please try again later"*.
-  Oyunun kendisi uzun oturumları kesiyor. 24 saat çalışmanın **bir numaralı engeli** bu; bekleyip
-  yeniden denemekten başka yolu yok, süresi ölçülmeli.
-- **~6 kare Shop (Misc sekmesi)**: bot dükkânda kalmış, `TROPHY_MENU` 300 tur boyunca `BLUE_SEARCH_COORDS`'a
-  kör basıyor. Dükkânda kör dokunuş **elmas harcatabilir** (Worker satın alma butonu `(140–380, 730–795)`,
-  `GAME_LOAD`'un her turda bastığı `(240, 800)`'e çok yakın). İki kare arasında elmas sayısında büyük
-  düşüş görünüyor; kullanıcının bilerek harcayıp harcamadığı kontrol edilmeli.
-- **Kahraman öldü ekranı** (RESURRECT 36 elmas / USE TOKEN / RETREAT): hiç işlenmiyor → 3 dakikalık
-  zaman aşımı + oyunu yeniden başlatma. RETREAT'e basmak yeterli olurdu.
-- "Festival Earnings → Gems COLLECT" gibi tek seferlik etkinlik pencereleri.
-
-### 1.4 Somut hatalar / riskler
-
-| # | Yer | Sorun |
+| İşlem | Süre | Not |
 |---|---|---|
-| H1 | `bot.py:436,444,462,876` | `btn_take_a_break`, `btn_king_claim`, `btn_archer_boosted` şablonları `En_Templates/`'te **yok** → bu kontroller hiç çalışmıyor (sessizce `None`). |
-| H2 | `bot.py:240` | `self.last_restart_start_time` (alt çizgisiz) yazılıyor, okunan `self._last_restart_start_time` → LDPlayer yeniden başlatma kapısının süre sayacı hiç sıfırlanmıyor. |
-| H3 | `bot.py:267,290` | `self._last_restart_match_count/self._match_count` → maç sayısı 0'ken `ZeroDivisionError`; genel `except` yutuyor. |
-| H4 | `controller.py` `tap/swipe/keyevent` | ADB `shell` çağrılarında `timeout` yok; soket donarsa bot sonsuza kadar asılı kalır. Genel `except` bunu yakalayamaz (hata değil, bekleme). |
-| H5 | `bot.py:241`, `subprocess.run(... quit)` | `ldconsole` çağrılarında timeout yok. |
-| H6 | `player_db.py` | 3.9 MB JSON her `mark_active`/süre dolumunda **tamamen** yeniden yazılıyor, atomik değil (yarıda öldürülürse dosya bozulur), hiç budanmıyor. |
-| H7 | genel | Loglar yalnızca konsolda; 24 saatlik bir koşudan sonra "ne oldu" sorusunun cevabı yok (`session_log.txt` sadece saatlik özet). |
-| H8 | `RESTART_GAME_WAIT = 18` vb. | Sabit beklemeler; ekran hazır olunca devam etmek yerine en kötü durum kadar bekleniyor. |
-| H9 | depo | Çalışma ağacında commitlenmemiş büyük değişiklik var (`bot.py` +~290 satır); proje `CLAUDE.md`'si MEmu dönemine ait ve gitignore'da. |
+| `screencap -p` (botun şu anki yolu) | **~1.2 sn / kare** | Cihazda PNG kodlama + aktarım |
+| `screencap` ham (RGBA, `-p`'siz) | ~0.5 sn / kare | Kolay ara adım |
+| `input tap` (tek ADB çağrısı) | **~234 ms / dokunuş** | Her çağrı cihazda bir Java süreci açıyor |
+| 5 `input tap` tek shell'de | ~976 ms | Toplu göndermek kurtarmıyor |
+| `sendevent` ile dokunuş | ~359 ms | Daha hızlı değil; üstelik dokunuşu kaydırma gibi algıladı |
+| Tesseract OCR, tek bölge | ~295 ms | Her çağrı ayrı `tesseract.exe` süreci |
+| Tam ekran şablon eşleme | ~333 ms | |
+| Bölgeli şablon eşleme | ~6 ms | |
+
+Sonuç: botu yavaşlatan şey sırasıyla **ekran alma gecikmesi (1.2 sn)**, **dokunuş gecikmesi (234 ms)**,
+**OCR ve bölgesiz arama**. Örnek: kupa filtresi ayarı 30 dokunuş × (234 + 150 ms bekleme) ≈ 11.5 sn.
+
+### 1.2 Denenen ve elenen "process listener" yolları
+
+- **logcat:** oyun Unity değil, keen games'in kendi motoru (`com.keengames.gameframework`); ekran/maç durumu loglamıyor.
+- **Firebase Analytics olayları** (`setprop log.tag.FA VERBOSE`): yerel olarak görünür hâle getirildi ama
+  maç boyunca yalnızca reklam olayı (`ad_query`) geldi; maç başı/sonu olayı yok. **Bu yol kapalı.**
+- Ağ dinleme ve bellek okuma ban riski nedeniyle önerilmiyor.
+
+→ Ekran durumu yine görüntüden okunacak; çözüm ekran almayı ve dokunmayı hızlandırmak (bkz. 3.2).
+
+### 1.3 Mevcut şablonlar güncel sürümde çalışıyor
+
+HEAD'deki şablonlar 12.9.0'da yüksek skorla tutuyor: `icon_forge` 1.00, `icon_trophy` 0.99, `btn_start_search` 0.99,
+`area_top_opponent` 0.93, `btn_attack_start` 0.97, `btn_green_back` 0.99, `btn_close` 1.00, `btn_archer` 0.99,
+`btn_collect_league` 1.00. Yani "tam ekran şablon" dönemi doğru çalışıyordu; sorun yalnızca hızdı.
+Doğru düzeltme OCR'a geçmek değil, **aynı şablonları bölgeyle sınırlamak** (333 ms → 6 ms).
+Commitlenmemiş OCR'lı sürüm `wip/ocr-regions` dalında saklandı; master HEAD'e döndü.
+
+Dikkat: sarı butonlar birbirine benziyor. Örneğin maç sonu "SKIP" butonu `btn_collect_league` ile 0.83 skor veriyor.
+Her şablon kendi bölgesinde ve kendi ekran imzasıyla birlikte aranmalı.
 
 ---
 
-## 2. Sorulara cevaplar
+## 2. Keşif bulguları (canlı oyun)
 
-### "Sabit tıklamalar mantıklı mı?"
-Evet, hız için doğru tercih. Kural şu olmalı: **ekranı teyit et → sabit dokunuş dizisini körlemesine bas →
-sonraki ekranı teyit et.** Ara adımlarda görüntü işleme gereksiz; ama dizinin başı ve sonu mutlaka
-doğrulanmalı. Şu anki hataların hepsi "teyit edilmemiş ekrana sabit dokunuş"tan çıkıyor.
+### 2.1 Ekranlar ve akış
 
-### "Ekran görüntüsü yerine process listener kullanabilir miyiz?"
-Kısaca: oyunun ekran durumunu dışarıya bildiren hazır bir sinyal yok; ama ucuz yollar var.
-
-| Yol | Ne verir | Değerlendirme |
+| Ekran | Tanıma | Not |
 |---|---|---|
-| `dumpsys activity/window` | Hangi Activity önde | Oyun tek Activity (Unity) → ekran ayrımı yok. Sadece "oyun çöktü mü / ön planda mı" için işe yarar. |
-| `adb logcat` (Unity etiketi) | Oyunun kendi logları | **10 dakikalık deneye değer.** Sahne geçişi, maç başı/sonu logluyorsa bedava ve anlık olay kaynağı olur. Logluyorsa durum tespitinin bir kısmı görüntüden kurtulur. |
-| Ağ trafiği (mitmproxy/tcpdump) | Maç başı/sonu, ödül API çağrıları | TLS + sertifika sabitleme muhtemel; zahmetli. Önerilmez. |
-| Bellek okuma / Frida / enjeksiyon | Her şey | Hile tespiti ve ban riski, ToS ihlalinin bir üst seviyesi. **Önerilmez.** |
-| **scrcpy video akışı** | Sürekli kare akışı (30–60 fps), son kare her an bellekte | Kare almak ~0 ms olur; `screencap -p`'nin cihazdaki PNG maliyeti ve gecikmesi kalkar. Hazine toplama için **şart**. |
-| Ham `screencap` (`-p`'siz) | Sıkıştırmasız RGBA | Kolay ara adım; cihazdaki PNG kodlamasını atlar. |
-| LDPlayer penceresini Windows'tan yakalama (DXGI/PrintWindow) | Çok hızlı | Pencere görünür olmalı; DirectX/OpenGL'de siyah kare riski. Yedek seçenek. |
+| Zorunlu güncelleme ("Download now!") | yükleme ekranında popup | Play Store'a gidiyor (`com.android.vending` ön planda) → "Update" → sürüm değişince oyunu yeniden aç. **24 saatlik çalışmayı durdurur; bot otomatik yapmalı.** |
+| Oyun içi indirme ("Downloading… %") | yükleme ekranı | Güncelleme sonrası; beklenmeli, yeniden başlatılmamalı |
+| Açılış popup zinciri | `btn_close` (1524,88) | "You have been attacked", "Webstore Gem Sale", "Webstore Exclusive Offer", "Special offer" → hepsinin çarpısı aynı yerde |
+| Lig sonucu ("JOIN LEAGUE!") | `btn_collect_league` | Çarpı yok, butona basılmalı |
+| Break Time | metin/şablon | ~5 saat oyundan sonra, ~15 dk (kullanıcı bilgisi) |
+| Conquest / klan hediyesi | toplama butonu | Ayda bir; çarpı değil toplama butonu |
+| HOME | `icon_forge` / `icon_trophy` | Sağ altta büyük çapraz kılıç = "Prepare for Battle" (kupaya yakın rastgele rakip) |
+| Global Leaderboard | `area_top_opponent` | Sağ/sol oklar yalnızca Global ↔ Alliances arasında geçiyor |
+| Advanced Search | `btn_start_search` | Kupa aralığı + "Currently online" vb. filtreler |
+| Prepare for Battle | `btn_attack_start` + `btn_green_back` | **Mini harita** (yol + binalar), dişli setleri A–F, "NEW ENEMY" 4.500 altın, "ATTACK!" ekmek |
+| Maç içi | `btn_archer` | ~1:40 süre; sağ üstte **15 elmaslık** iki güçlendirme (9 ve 0 tuşları) |
+| Maç sonu | "SKIP" → birkaç sn sonra "CONTINUE" | Kayıpta sandık yok |
 
-Asıl kazanç: **durum tespitinde OCR'ı ve bölgesiz aramayı kaldırmak.** Her ekran 2–3 küçük bölgeli
-şablon veya birkaç piksel rengiyle tanınabilir → ekran sınıflandırma kare başına ~5–15 ms.
-OCR yalnızca sayı (altın/inci/kupa) ve rakip ismi için kalır, o da durum belli olduktan sonra.
+Butonlardaki yazıların bir kısmı Türkçe ("Hadi bak!", "Teklifi incele"); README "oyun İngilizce olmalı" diyor ama
+teklif pencereleri yerel dilde geliyor. **Metne dayalı (OCR) tespitin bir kırılganlığı daha.**
 
-### "Oyunu sen oynayıp incelesen, ben her durumu review etmesem"
-Yapılabilir: LDPlayer açıkken ADB üzerinden ekran alıp bakabiliyor ve dokunabiliyorum. Bunu tek seferlik
-bir gezinti değil, **kalıcı bir sistem** olarak kurmayı öneriyorum (Faz 1):
-1. **Ekran atlası:** her ekran için örnek kareler + imza (hangi bölgede hangi şablon/renk) tek bir veri
-   dosyasında (`screens.yaml`). Ekranları ben gezip çıkarırım.
-2. **Bilinmeyen ekran kutusu:** bot tanımadığı her kareyi (benzerleri tekilleştirerek) `unknown/`'a kaydeder.
-   Senin işin "bot takıldı mı" diye izlemek değil; arada bir bana "unknown'a bak" demek. Ben etiketlerim,
-   imza eklerim.
-3. **Çevrimdışı regresyon testi:** etiketli her kare bir test olur (`tests/screens/<ekran>/*.png`).
-   `uv run pytest` sınıflandırıcının hepsini doğru tanıdığını emülatörsüz doğrular. Değişiklik sonrası
-   manuel test ihtiyacının büyük kısmı burada biter.
+### 2.2 Maç içi
+
+- HEAD'de `IN_GAME_TAP_COORDS = (10, 10)`: **kral hiç yürümüyor**, maçı birlikler kazanıyor (600 kupada yeterli).
+  Kaydedilen videoda kral başlangıç noktasında kaldı.
+- Oyun **klavye kısayollarını** ekranda gösteriyor: 1-2-3 birlikler, 5-6-7 büyüler, Q/W yetenekler, 9/0 elmaslı
+  güçlendirmeler. `input keyevent` ile çalışıyor (W denendi, yetenek tetiklendi). Birlik/büyü çağırmak için
+  koordinat yerine tuş kullanılabilir: ekran düzeni değişse de bozulmaz.
+  **9 ve 0 asla gönderilmemeli** (15'er elmas).
+- Yön tuşları kralı yürütmüyor; kral yalnızca dokunuşla hareket ediyor.
+- Kamera kralı takip ediyor; sabit bir ekran noktasına basmak "kralın göreli olarak şu yönüne git" demek.
+  Yol döndüğünde sabit nokta yolun dışına düşüyor; kralın "pek kıpırdamaması"nın sebebi bu.
+
+### 2.3 Elmas harcatabilecek bölgeler (kör dokunuş yasak)
+
+Maç içi (1300,110) ve (1490,110) güçlendirmeleri, ölüm ekranında "RESURRECT 36", Shop'ta Worker satın alma
+`(140–380, 730–795)`, "NEW ENEMY" (4.500 altın). Kurtarma merdiveni bu bölgelere hiçbir zaman kör basmamalı.
+
+### 2.4 Rakip isimleri
+
+Düşük kupalı listede isimlerin çoğu Vietnamca karakterli rastgele hesaplar. Tesseract (eng) bunları bozuk okuyor;
+`player_data.json`'ın 3.9 MB olmasının bir sebebi muhtemelen aynı oyuncunun farklı okunuşlarla tekrar tekrar
+kaydedilmesi. **Öneri:** isim bölgesinin görüntü özetini (perceptual hash) anahtar olarak kullanmak. OCR yok,
+dil bağımsız, ~1 ms.
 
 ---
 
 ## 3. Hedef mimari
 
 ```
- FrameSource ──► ScreenClassifier ──► Policy (ekran → eylem) ──► Controller
- (scrcpy/raw)     (screens.yaml,        (sabit dokunuş makroları,   (ADB, hepsi
-                   ~10 ms, OCR yok)      her makro sonunda teyit)    timeout'lu)
+ FrameSource ──► ScreenClassifier ──► Policy (ekran → eylem) ──► Input
+ (scrcpy akışı)   (screens.yaml,        (sabit dokunuş makroları,   (scrcpy kontrol kanalı;
+                   bölgeli şablon,       her makro sonunda teyit)    birlik/büyü için tuş)
+                   ~10 ms, OCR yok)
                          │
                          └─ tanınmayan → kurtarma merdiveni + unknown/'a kaydet
 
- Supervisor (ayrı süreç): botu başlatır, heartbeat dosyasını izler, asılırsa öldürüp yeniden başlatır,
- Break Time beklemesini yönetir, günlük rapor üretir.
+ Supervisor (ayrı süreç): botu başlatır, heartbeat'i izler, asılırsa yeniden başlatır,
+ Break Time / güncelleme beklemelerini yönetir, günlük rapor üretir.
 ```
 
-- **Algıla → karar ver döngüsü:** her karede "bu hangi ekran?" sorusu sorulur; `self.state` artık tahmin değil,
-  gözlem. RESYNC, `GOING_BACK`, miss sayaçlarının çoğu ortadan kalkar. Hız kaybı yok: sınıflandırma ~10 ms.
-- **Beklenen ekran + zaman aşımı:** her makro "şu ekranlardan birine geçmeliyim, en geç N sn" bilgisini taşır.
-  Sabit `sleep`'ler yerine `wait_for(ekranlar, timeout)` → döngü kısalır.
-- **Kurtarma merdiveni** (bilinmeyen ekran süresi arttıkça): bilinen kapat butonları → Android BACK →
-  oyunu yeniden başlat → LDPlayer'ı yeniden başlat. Hiçbir basamak elmas harcayabilecek bir bölgeye
-  kör dokunmaz.
-- **Kalıcı kayıt:** `matches.csv` (her maç: süre, sonuç, altın/inci farkı, rakip), `events.jsonl`
-  (her ekran geçişi ve kurtarma), dönen dosya loglar. Oyuncu DB'si SQLite'a (atomik, budanabilir).
-- **Supervisor:** 24 saat hedefinin sigortası. Bot içinde ne asılırsa assın (H4, H5) dışarıdan kurtarılır.
+### 3.1 Algıla → karar ver
+
+Her karede "bu hangi ekran?" sorulur; `self.state` tahmin değil gözlem olur. RESYNC, `GOING_BACK` ve miss
+sayaçlarının çoğu kalkar. Sabit dokunuşlar korunur, kural şu: **ekranı teyit et → dokunuş dizisini kör bas →
+sonraki ekranı teyit et.** Sabit `sleep`'ler yerine `wait_for(ekranlar, timeout)`.
+
+### 3.2 Hız: scrcpy
+
+scrcpy sunucusu cihazda tek süreç olarak kalır; video akışı (son kare her an bellekte, ~0 ms) ve kontrol kanalı
+(dokunuş/tuş ~1-5 ms, süreç açmadan) verir. Ölçülen 1.2 sn/kare ve 234 ms/dokunuş birlikte kalkar.
+Bir maç döngüsünde ~15 kare + ~40 dokunuş varsayımıyla **maç başına ~25 sn** tasarruf beklenir; Faz 2'de ölçülecek.
+Gereken: `scrcpy-server` jar (scrcpy sürümünden) + Python istemcisi; ffmpeg makinede mevcut.
+
+### 3.3 Kurtarma merdiveni
+
+Bilinmeyen ekran süresi arttıkça: bilinen çarpılar (1524,88) → bilinen toplama butonları → Android BACK →
+oyunu yeniden başlat → LDPlayer'ı yeniden başlat. Hiçbir basamak 2.3'teki bölgelere dokunmaz.
+Tanınmayan kareler tekilleştirilip `unknown/`'a kaydedilir; ben etiketleyip imza ve test eklerim.
+
+### 3.4 Kayıt ve test
+
+- `matches.csv` (her maç: süre, sonuç, kupa/altın/inci farkı), `events.jsonl` (ekran geçişleri, kurtarmalar).
+- Oyuncu DB'si SQLite'a (atomik, budanabilir), anahtar görüntü özeti.
+- `tests/screens/<ekran>/*.png` etiketli kareler; `uv run pytest` emülatörsüz doğrular. Bu oturumda toplanan
+  ~30 kare (popup zinciri, güncelleme, leaderboard, search, prepare, maç, sonuç) ilk test seti olur.
 
 ---
 
 ## 4. Fazlar
 
-Her faz tek başına kullanılabilir bir kazanç bırakır; büyük patlama yeniden yazım yok.
+### Faz 0 — Sağlamlık ve ölçüm (HEAD üzerine)
+- Şablon aramalarını bölgeyle sınırla (OCR'a geçmeden).
+- Yeni ekranlar: zorunlu güncelleme (Play Store akışı dahil), oyun içi indirme beklemesi, açılış popup zinciri,
+  JOIN LEAGUE, RETREAT (kahraman öldü), Shop'tan çıkış, Break Time (~15 dk bekle, tekrar dene).
+- Hatalar: eksik şablonlar (`btn_take_a_break`, `btn_king_claim`, `btn_archer_boosted`), `bot.py:240` yazım hatası,
+  sıfıra bölme, ADB/`ldconsole` çağrılarına timeout.
+- Heartbeat + supervisor betiği; dosya log + `matches.csv`.
+- **Çıktı:** 24 saatlik koşu ve rapor (maç/saat, inci/saat, kurtarma sayısı, Break Time sayısı).
 
-### Faz 0 — Sağlamlık ve ölçüm (küçük, hemen)
-- Commitlenmemiş çalışmayı netleştir (H9), `bot_backup_*.py`'ı kaldır.
-- H1–H5 düzeltmeleri; RETREAT ekranı (kahraman öldü); Shop ekranı tespiti → kapat.
-- Break Time: tespit et, kaç dakika sürdüğünü logla, bekle (şimdilik sabit, ölçünce akıllı).
-- Tüm ADB/subprocess çağrılarına timeout; heartbeat dosyası + basit supervisor betiği.
-- Dosya log + `matches.csv`; her aşamanın süresini ölç (kare alma / tespit / bekleme).
-- **Çıktı:** 24 saatlik deneme koşusu ve sayılarla rapor (maç/saat, inci/saat, kurtarma sayısı, Break Time sayısı).
-
-### Faz 1 — Ekran atlası ve sınıflandırıcı (benim işim, senin emülatörünle)
-- LDPlayer açıkken ekranları gezip atlas çıkarırım (`fail_debug/` mevcut 22 kare de dahil).
-- `screens.yaml` + `ScreenClassifier` + `tests/screens/` regresyon testleri.
-- Bot önce **gölge modda**: eski mantık çalışır, sınıflandırıcı yanında çalışıp anlaşmazlıkları loglar.
-  Anlaşmazlık sıfıra inince Faz 3'e geçilir.
+### Faz 1 — Ekran atlası ve sınıflandırıcı
+- `screens.yaml` + `ScreenClassifier` + regresyon testleri (bu oturumun kareleri + `fail_debug/`).
+- Önce gölge mod: eski mantık çalışır, sınıflandırıcı yanında anlaşmazlıkları loglar.
 
 ### Faz 2 — Hız
-- Kare kaynağı: önce ham `screencap`, sonra scrcpy akışı; ölçerek karşılaştır.
-- Durum tespitinden OCR ve bölgesiz aramayı tamamen çıkar.
-- Opsiyonel: `adb logcat` denemesi; oyun işe yarar log basıyorsa olay kaynağı olarak ekle.
-- **Ölçüt:** ortalama döngü süresi (maç dışı kısım) Faz 0 ölçümüne göre.
+- scrcpy akışı + kontrol kanalı; birlik/büyü çağrıları tuşla.
+- Rakip ismi OCR'ı yerine görüntü özeti.
+- **Ölçüt:** ortalama döngü süresi, Faz 0 ölçümüne karşı.
 
 ### Faz 3 — Algıla/karar ver döngüsüne geçiş
-- Ekran ekran eski handler'ların yerine politika tablosu. Sırayla: COF → Shop/popup'lar → HOME → TROPHY_MENU
-  → FILTERED_RANKS → ATTACK_PREP → GAME_LOAD → IN_GAME.
-- Her geçişte Faz 0'daki 24 saatlik koşu tekrarlanır, sayılar kıyaslanır.
+- Ekran ekran: popup'lar → COF → HOME → TROPHY_MENU → FILTERED_RANKS → ATTACK_PREP → GAME_LOAD → IN_GAME.
+- Her adımda 24 saatlik koşu tekrarlanır.
 
-### Faz 4 — Maç içi hazine toplama (ayrıntı aşağıda)
-
----
-
-## 5. Hazine toplama planı
-
-Zor kısım doğru: konum rastgele, kamera kahramanı takip ediyor, nesneler animasyonlu ve üst üste binebiliyor,
-üstelik **seçici** olmak için türünü de bilmek gerekiyor. Bu yüzden önce veri, sonra model.
-
-**Ön koşul:** Faz 2'deki akış (scrcpy). Saniyede 1 kare ile hareketli hazine kovalanmaz.
-
-1. **Kayıt (emeksiz):** normal bot koşularında maç içi kareler 3–5 fps diske yazılır (yalnızca IN_GAME).
-   Birkaç düzine maç yeterli başlangıç verisi.
-2. **Katalog (ben):** kareleri inceleyip düşen nesne türlerini çıkarırım: görünüş, ne kadar ekranda kaldığı,
-   toplamak için dokunmak mı gerekiyor yoksa kahramanın üstünden geçmesi mi, kaybolma süresi.
-   Değer sıralamasını sen verirsin (hangisi toplanmaya değer).
-3. **Tespit — iki kademe:**
-   - *Hızlı başlangıç:* tür başına birkaç şablon + HSV renk maskesi ön filtresi (parıltı/renk çok ayırt ediciyse
-     bu yeterli olabilir; kamera yakınlığı sabit olduğundan ölçek pek değişmez).
-   - *Sağlam çözüm:* küçük bir nesne tespit modeli (YOLO "nano" sınıfı). CPU'da 640 px'de kare başına
-     ~10–30 ms. Etiketleme: şablon eşleşmeleri ilk etiketleri otomatik üretir, ben düzeltirim; tür başına
-     birkaç yüz örnek genelde yeter.
-4. **Eylem politikası:** maç ilerleme dokunuşu ile çakışıyor, o yüzden basit bir kural:
-   değerli nesne + kahramana yakın + zaman bütçesi var → nesneye dokun, kaybolana kadar (veya 2–3 sn) bekle,
-   ilerlemeye dön. Zaman bütçesi ve yarıçap ayarlanabilir.
-5. **Değerlendirme:** özellik aç/kapa ile A/B; ölçüt "saat başı kazanç", çünkü toplamak maçı uzatır.
-   Döngü süresi artışı kazancı yiyorsa kapalı kalır.
-
-Belirsizlikler (kayıt/katalog adımında netleşecek): toplama dokunuşla mı yürüyerek mi, nesneler ne kadar
-yaşıyor, maç sonunda otomatik toplanıyorlar mı (öyleyse hiç gerek kalmayabilir).
+### Faz 4 — Hazine modu (24 saat kanıtlandıktan sonra, aç/kapa)
 
 ---
 
-## 6. Açık sorular (kullanıcıya)
+## 5. Hazine modu
 
-1. Hazineler dokunarak mı toplanıyor, kahraman üstünden geçince mi? Hangileri değerli?
-2. Break Time ne sıklıkla ve ne kadar süre çıkıyor, biliyor musun? (Bilmiyorsak Faz 0 ölçecek.)
-3. Commitlenmemiş `bot.py`/`vision.py` değişiklikleri istenen hâl mi, yoksa deneme mi?
+### 5.1 Bilinenler (kullanıcıdan)
+- Hazineler binalar yıkılınca **yola, binanın önüne** düşüyor; ne zaman düşeceği belli değil, **hareket etmiyorlar**.
+- **Kral üzerinden geçince** toplanıyor (dokunmak gerekmiyor).
+- Değerli olan genelde elmas, ama kullanıcı hangi türleri toplayacağını **kendisi seçebilmeli**.
+- Hazine maçları 600 kupada değil; oyuncunun kupası düşük tutulur (~2000) ve rakip ona yakın olur.
+- Asıl hedef: kullanıcının **favorilere kaydettiği hazine üsleri** (çok kuleli, kolay).
+
+### 5.2 Neden zor ve nasıl kolaylaşıyor
+Asıl zorluk tespit değil, **kralı yolda yürütmek**: hazineler yolun üstünde olduğuna göre yolu baştan sona yürüyen
+kral çoğunu zaten toplar. Seçicilik ancak sapma/bekleme gerektiğinde devreye girer.
+
+1. **Rota, maç öncesi mini haritadan:** "Prepare for Battle" ekranındaki mini harita yolu (bej) ve binaları
+   üstten gösteriyor. Buradan yol iskeleti ve "yola bitişik binalar" (olası düşme noktaları) çıkarılır.
+   Favori üsler sabit olduğundan rota üs başına bir kez çıkarılıp saklanabilir.
+2. **Maç içinde yol takibi:** kamera kralı ortalıyor. Kralın çevresinde yol rengi bölütlenir, rotadaki bir sonraki
+   noktaya doğru yoldaki bir noktaya dokunulur ya da basılı tutulur. Kral takılırsa (kare farkı ~0) alternatif nokta denenir.
+3. **Hazine tespiti:** önce tür başına şablon + renk filtresi (nesneler hareketsiz ve kamera yakınlığı sabit,
+   bu çoğu durumda yeter); yetmezse küçük bir YOLO-nano modeli (CPU'da ~10-30 ms). Veri, normal koşularda
+   maç içi kayıtlardan gelir.
+4. **Seçici politika:** kullanıcının seçtiği tür + rotadan sapma mesafesi + kalan süre → sap, üstünden geç, rotaya dön.
+   Seçilmeyen türler için sapma yapılmaz (yol üstündeyse zaten toplanır).
+5. **Akış farkı:** HOME → favoriler → üs seç → saldır. Birlik/büyü çağrıları tuşla. Maç sonu aynı.
+6. **Değerlendirme:** aç/kapa A/B; ölçüt saat başı elmas (ve seçilen diğer türler).
+
+### 5.3 Açık sorular
+1. Favori üsler listesi oyunda nerede açılıyor? (Leaderboard sekmelerinde ve "Prepare for Battle"da yok.)
+2. Hazine maçında birlikler de kullanılacak mı, yoksa kral tek başına mı yürüyecek?
+3. Düşen hazine türleri neler (elmas dışında)? Bir hazine maçını ekran kaydıyla izlersem kataloğu ben çıkarırım.
