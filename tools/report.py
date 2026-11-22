@@ -10,6 +10,7 @@ import argparse
 import csv
 import os
 import time
+import sys
 from collections import Counter
 from datetime import datetime, timedelta
 
@@ -37,6 +38,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--hours", type=float, default=24)
     args = ap.parse_args()
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # Turkish console = cp1254
     since = datetime.now() - timedelta(hours=args.hours)
 
     matches = rows("matches.csv", since)

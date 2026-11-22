@@ -83,6 +83,8 @@ def run_once(bot_args):
     env = dict(os.environ, PYTHONIOENCODING="utf-8")  # bot prints "→"; cp1252 pipes can't
     proc = subprocess.Popen([sys.executable, "-u", BOT, *bot_args], cwd=ROOT, env=env)
     log(f"bot started (pid {proc.pid}) args={' '.join(bot_args) or '(defaults)'}")
+    seen_heartbeat = False
+    last_ok = start
     try:
         while True:
             time.sleep(POLL)
@@ -92,10 +94,18 @@ def run_once(bot_args):
             age, frame_age = heartbeat_ages()
             elapsed = time.time() - start
             if age is None:
-                if elapsed > STARTUP_GRACE:
+                # Unreadable can be transient (the bot is replacing the file right now).
+                # Before the first heartbeat: startup grace. After: same limit as stale.
+                if not seen_heartbeat and elapsed > STARTUP_GRACE:
                     kill_tree(proc)
                     return elapsed, f"no heartbeat {STARTUP_GRACE}s after start"
-            elif age > HEARTBEAT_TIMEOUT:
+                if seen_heartbeat and time.time() - last_ok > HEARTBEAT_TIMEOUT:
+                    kill_tree(proc)
+                    return elapsed, f"heartbeat unreadable for {HEARTBEAT_TIMEOUT}s"
+                continue
+            seen_heartbeat = True
+            last_ok = time.time()
+            if age > HEARTBEAT_TIMEOUT:
                 kill_tree(proc)
                 return elapsed, f"heartbeat stale for {age:.0f}s (hung)"
             elif frame_age is not None and frame_age > FRAME_TIMEOUT:
