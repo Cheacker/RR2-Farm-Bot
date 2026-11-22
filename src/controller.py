@@ -5,6 +5,7 @@ import time
 import subprocess
 
 SHELL_TIMEOUT = 10  # seconds; any single ADB shell command taking longer is treated as a wedged socket
+CAPTURE_TIMEOUT = 8  # seconds per screencap attempt; a healthy one takes ~1.2 s
 
 
 class ADBController:
@@ -108,7 +109,7 @@ class ADBController:
         for attempt in range(retries):
             try:
                 t0 = time.perf_counter()
-                img_bytes = self.device.shell("screencap -p", encoding=None, timeout=15)
+                img_bytes = self.device.shell("screencap -p", encoding=None, timeout=CAPTURE_TIMEOUT)
                 if not img_bytes:
                     continue
                 nparr = np.frombuffer(img_bytes, np.uint8)
@@ -175,12 +176,26 @@ class ADBController:
         if self.device:
             self._sh(f"am force-stop {package}")
 
+    def wait_boot_completed(self, timeout=120):
+        """Poll sys.boot_completed after an emulator (re)start. ADB answers well before
+        Android has finished booting; screencaps taken in that window were seen to
+        hang (2026-11-22). Returns True once booted."""
+        deadline = time.time() + timeout
+        while self.device and time.time() < deadline:
+            try:
+                if self._sh("getprop sys.boot_completed", timeout=5).strip() == "1":
+                    return True
+            except Exception:
+                pass
+            time.sleep(3)
+        return False
+
     def quick_screen_check(self):
         """Single screencap — no reconnect side-effects. Returns True if screen is readable."""
         if not self.device:
             return False
         try:
-            img_bytes = self.device.shell("screencap -p", encoding=None, timeout=15)
+            img_bytes = self.device.shell("screencap -p", encoding=None, timeout=CAPTURE_TIMEOUT)
             if not img_bytes:
                 return False
             nparr = np.frombuffer(img_bytes, np.uint8)

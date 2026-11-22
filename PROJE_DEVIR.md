@@ -16,7 +16,8 @@ supervisor.py ── başlatır/izler ──► src/bot.py (RR2Bot)
 
 Ana döngü (`RR2Bot.loop`), her turda:
 1. `_heartbeat()` (2 sn'de bir dosyaya yazar)
-2. `current_screen()`; `None` ise bağlantı kurtarma (20 kez → yeniden bağlan → oyun ya da LDPlayer yeniden başlat)
+2. `current_screen()` (deneme başına 8 sn zaman aşımı); `None` ise `_handle_no_screen()`: son geçerli kareden beri
+   90 sn → ADB yeniden bağlan + oyunu yeniden başlat, 5 dk → LDPlayer'ı yeniden başlat (koşulsuz)
 3. `_check_interrupts()`: Break Time, zorunlu güncelleme, "Downloading", Shop. IN_GAME'de yalnızca 3 sn'de bir.
 4. Durum işleyicisi: HOME → TROPHY_MENU → FILTERED_RANKS → ATTACK_PREP → GAME_LOAD → IN_GAME → CHAMBER_OF_FORTUNE
 5. 10 ardışık kaçırmada `_find_state()` (tam ekran tarama) ile yeniden senkron
@@ -59,6 +60,10 @@ Ana döngü (`RR2Bot.loop`), her turda:
 
 - **`adb kill-server` kullanma.** LDPlayer açılırken ADB sunucusunu sıfırlamak çalışacak bağlantıyı bozuyordu
   (bkz. commit af3ff2d). Yalnızca `adb connect` yoklaması.
+- **Kör emülatör (2026-11-22):** LDPlayer yeniden başladıktan hemen sonra ADB bağlı görünürken her `screencap`
+  zaman aşımına düştü; Google Play Games de "bağlanamıyor" hatası verdi. LDPlayer'ı yeniden başlatmak çözdü
+  (oyunu silmek gerekmedi). Bu yüzden: `wait_boot_completed()`, zamana dayalı kurtarma ve supervisor'da
+  `FRAME_TIMEOUT` (heartbeat satırı `<şimdi> <durum> <son geçerli kare>`).
 - **Bot her başlangıçta LDPlayer'ı yeniden başlatır** (takılı kalmış örnek sağlıklı görünebiliyor). Supervisor
   botu yeniden başlatınca LDPlayer da yeniden başlar.
 - **`ldconsole quit` zaman aşımı** bir kez eklenip geri alındı (f0770e1 → 3545cae, sebep belirtilmemiş). Takılırsa

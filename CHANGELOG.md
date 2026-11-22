@@ -21,6 +21,10 @@ Uzun, gözetimsiz çalışma için sağlamlık sürümü (Yol Haritası Faz 0).
 - **Kayıtlar:** `logs/matches.csv` (her maç), `logs/events.csv` (her kurtarma/yeniden başlatma ve sebebi),
   `logs/bot_*.log` (zaman damgalı konsol). `tools/report.py` bunlardan özet çıkarır. Saatlik özete ekran alma
   süresi ve olay sayısı eklendi.
+- **Kör kalmaya karşı:** emülatör ADB'ye bağlı görünüp ekran vermediğinde (2026-11-22'de canlı koşuda yaşandı)
+  bot artık 90 sn sonra yeniden bağlanıyor, 5 dk sonra LDPlayer'ı yeniden başlatıyor. Eski "1 saat + 20 maç" şartı
+  kaldırıldı; bu şart botu sonsuza kadar kör bırakabiliyordu. Supervisor da 10 dk boyunca hiç ekran gelmezse botu
+  yeniden başlatıyor. LDPlayer açıldıktan sonra Android açılışının bitmesi bekleniyor.
 - **Hata düzeltmeleri:** LDPlayer yeniden başlatma süresinin hiç sıfırlanmaması (yazım hatası), bağlantı kopma
   mesajındaki sıfıra bölme.
 - **Kurulum:** `uv` ile (`pyproject.toml`); `requirements.txt` eski yöntem için duruyor.

@@ -5,7 +5,9 @@ Starts src/bot.py with the same arguments, watches logs/heartbeat.txt and
 restarts the bot when it
   * exits for any reason (crash, sys.exit, Ctrl+C inside the bot's own window), or
   * stops updating its heartbeat for HEARTBEAT_TIMEOUT seconds (hung ADB call,
-    endless inner loop...). The whole process tree is killed first.
+    endless inner loop...), or
+  * keeps running but gets no screen frame for FRAME_TIMEOUT seconds (blind).
+The whole process tree is killed first.
 
 Every restart of the bot also restarts LDPlayer (bot.py does that on startup),
 so a wedged emulator is reset as well.
@@ -26,6 +28,8 @@ HEARTBEAT = os.path.join(LOG_DIR, "heartbeat.txt")
 SUPERVISOR_LOG = os.path.join(LOG_DIR, "supervisor.log")
 
 HEARTBEAT_TIMEOUT = 300   # s without a heartbeat → bot considered hung
+FRAME_TIMEOUT = 10 * 60   # s without a good screen frame → bot considered blind
+                          # (the bot itself restarts LDPlayer after 5 min; this is the backstop)
 STARTUP_GRACE = 240       # s allowed for LDPlayer restart + first heartbeat
 QUICK_EXIT = 120          # a run shorter than this counts as a failed start
 MAX_BACKOFF = 15 * 60     # s; wait cap after repeated failed starts
@@ -40,12 +44,18 @@ def log(msg):
         f.write(line + "\n")
 
 
-def heartbeat_age():
+def heartbeat_ages():
+    """(heartbeat age, last-good-frame age) in seconds; None where unreadable.
+    Heartbeat line: '<now> <state> <last good frame>'."""
     try:
         with open(HEARTBEAT, encoding="utf-8") as f:
-            return time.time() - float(f.read().split()[0])
+            parts = f.read().split()
+        now = time.time()
+        beat = now - float(parts[0])
+        frame = now - float(parts[2]) if len(parts) >= 3 else None
+        return beat, frame
     except (OSError, ValueError, IndexError):
-        return None
+        return None, None
 
 
 def kill_tree(proc):
@@ -79,7 +89,7 @@ def run_once(bot_args):
             code = proc.poll()
             if code is not None:
                 return time.time() - start, f"exited with code {code}"
-            age = heartbeat_age()
+            age, frame_age = heartbeat_ages()
             elapsed = time.time() - start
             if age is None:
                 if elapsed > STARTUP_GRACE:
@@ -88,6 +98,11 @@ def run_once(bot_args):
             elif age > HEARTBEAT_TIMEOUT:
                 kill_tree(proc)
                 return elapsed, f"heartbeat stale for {age:.0f}s (hung)"
+            elif frame_age is not None and frame_age > FRAME_TIMEOUT:
+                # Loop still running but blind (e.g. wedged screencap) and the bot's
+                # own LDPlayer restart didn't fix it: start over from scratch.
+                kill_tree(proc)
+                return elapsed, f"no screen frame for {frame_age:.0f}s (blind)"
     except KeyboardInterrupt:
         kill_tree(proc)
         raise

@@ -38,13 +38,13 @@ RESTART_GAME_WAIT      = 18  # seconds to wait after restart_game()/a HOME popup
                               # for the game to settle back onto a stable screen
 CONNECT_POLL_TIMEOUT   = 60  # seconds to poll 'adb connect' at startup before giving up (no restart)
 
-# Gate on restarting LDPlayer mid-run: only once the session has proven itself
-# (long runtime, many matches played) do we allow touching LDPlayer on a
-# disconnect -- restarting it over an early/transient hiccup was the actual
-# thing making startup and short sessions unreliable.
-LD_RESTART_MIN_RUNTIME  = 3600  # seconds (1 hour)
-LD_RESTART_MIN_MATCHES  = 20
-LD_RESTART_CONNECT_TIMEOUT = 60  # seconds to poll 'adb connect' before restarting LDPlayer
+# No-frame recovery (see _handle_no_screen), measured from the last good screencap.
+# This replaced the old "1 h runtime + 20 matches" gate on mid-run LDPlayer restarts:
+# that gate protected against restarting over a transient hiccup, but it also left
+# the bot blind forever when the emulator wedged early in a run. A full 5 minutes
+# without a single frame is not a transient hiccup.
+NO_FRAME_RECONNECT  = 90       # s → reconnect ADB + restart the game
+NO_FRAME_LD_RESTART = 5 * 60   # s → restart LDPlayer
 
 # ldconsole.exe lives inside the versioned LDPlayer install folder (LDPlayer9,
 # LDPlayer14, ...) which differs per machine/drive — glob instead of hardcoding.
@@ -133,6 +133,8 @@ class RR2Bot:
         # restart even runs is wasted work whose result gets thrown away the
         # instant the restart happens -- only try after the restart completes.
         self._last_heartbeat = 0
+        self._last_good_frame = time.time()  # startup counts as fresh
+        self._no_screen_stage = 0            # 0 ok, 1 reconnected, 2 LDPlayer restarted
         self.state = State.HOME
         self._heartbeat(force=True)  # supervisor.py counts startup (LDPlayer restart) from here
         self.adb = ADBController(port=port, connect_on_init=False)
@@ -167,8 +169,6 @@ class RR2Bot:
         self._scroll_count      = 0
         self._chest_taps        = 0
         self._match_count       = 0
-        self._last_restart_match_count = 0
-        self._last_restart_start_time = time.time()
         self._start_time        = time.time()
         self._loop_start        = time.time()
         self._no_opponent_count = 0
@@ -187,7 +187,6 @@ class RR2Bot:
         self._gold_last         = None
         self._pearl_last        = None
         self._game_load_miss    = 0
-        self._screen_none_count = 0
         self._anchor_miss_streak = 0
         self._capture_inactives  = capture_inactives
         self._capture_wait_start = 0
@@ -230,6 +229,8 @@ class RR2Bot:
         while time.time() < deadline:
             self.adb._connect()
             if self.adb.device:
+                if not self.adb.wait_boot_completed():
+                    print("[EMULATOR] Android didn't report boot completed within 120s — continuing anyway.")
                 return
             time.sleep(3)
         print(f"[EMULATOR] Still not connected after {CONNECT_POLL_TIMEOUT}s post-restart. "
@@ -246,8 +247,6 @@ class RR2Bot:
         print(f"[EMULATOR] Restarting LDPlayer instance --index {self._ld_index}...")
         subprocess.run([self._ldconsole, "quit", "--index", str(self._ld_index)], capture_output=True)
         time.sleep(3)
-        self._last_restart_match_count = 0
-        self._last_restart_start_time = time.time()
         subprocess.Popen([self._ldconsole, "launch", "--index", str(self._ld_index)])
         time.sleep(15)
 
@@ -261,50 +260,11 @@ class RR2Bot:
                 self._heartbeat()
                 screen = self.adb.current_screen()
                 if screen is None:
-                    self._screen_none_count += 1
-                    if self._screen_none_count >= 20:
-                        self._screen_none_count = 0
-                        print("[LOOP] No screen for a while — checking the connection...")
-                        self.adb.device = None
-                        self.adb._connect()
-                        if self.adb.device:
-                            self.adb.ensure_resolution(1600, 900)
-                            self._restart_game("reconnected after screen loss")
-                            self.state = State.HOME
-                            continue
-
-                        runtime = time.time() - self._last_restart_start_time
-                        if runtime > LD_RESTART_MIN_RUNTIME and self._last_restart_match_count > LD_RESTART_MIN_MATCHES:
-                            print(f"[LOOP] Still disconnected (runtime={runtime:.0f}s, "
-                                  f"matches={self._last_restart_match_count}) — polling {LD_RESTART_CONNECT_TIMEOUT}s "
-                                  f"before restarting LDPlayer...")
-                            deadline = time.time() + LD_RESTART_CONNECT_TIMEOUT
-                            while time.time() < deadline:
-                                self.adb._connect()
-                                if self.adb.device:
-                                    break
-                                time.sleep(3)
-                            if not self.adb.device:
-                                self._event("ldplayer_restart", f"disconnected, runtime={runtime:.0f}s")
-                                self._restart_ldplayer()
-                                deadline = time.time() + 90
-                                while time.time() < deadline:
-                                    self.adb._connect()
-                                    if self.adb.device:
-                                        break
-                                    time.sleep(3)
-                            if self.adb.device:
-                                self.adb.ensure_resolution(1600, 900)
-                                self._restart_game("after LDPlayer restart")
-                                self.state = State.HOME
-                        else:
-                            print(f"[LOOP] Disconnected, but restart conditions not met yet (need "
-                                  f"runtime>{LD_RESTART_MIN_RUNTIME}s and matches>{LD_RESTART_MIN_MATCHES}; "
-                                  f"have runtime={runtime:.0f}s, matches={self._last_restart_match_count}) — "
-                                  f"retrying the connection without touching LDPlayer.")
+                    self._handle_no_screen()
                     time.sleep(0.1)
                     continue
-                self._screen_none_count = 0
+                self._last_good_frame = time.time()
+                self._no_screen_stage = 0
 
                 # Full-screen interrupts (Break Time, forced update, stray Shop, asset
                 # download) can appear on top of any state. Checked before the state
@@ -358,6 +318,53 @@ class RR2Bot:
                 print(f"Error: {e}")
                 time.sleep(0.5)
 
+    # ── No screen: time-based recovery ladder ────────────────────────────────
+    def _handle_no_screen(self):
+        """Called when a screencap failed. Escalates by how long it has been since the
+        last good frame — not by a failure count, since a single failed capture can
+        take anywhere from 0 s (no device) to 4 x 8 s (wedged screencap).
+
+        Field case 2026-11-22: right after the startup LDPlayer restart, ADB stayed
+        connected but every screencap timed out. The old ladder only reconnected (ADB
+        looked fine) and restarted the game, and gated LDPlayer restarts behind 1 h of
+        runtime + 20 matches — so the bot stayed blind indefinitely."""
+        blind = time.time() - self._last_good_frame
+        if self._no_screen_stage == 0 and blind >= NO_FRAME_RECONNECT:
+            self._no_screen_stage = 1
+            self._event("no_screen", f"{blind:.0f}s without a frame — reconnecting ADB")
+            self.adb.device = None
+            self.adb._connect()
+            if self.adb.device:
+                self.adb.ensure_resolution(1600, 900)
+                self._restart_game("reconnected after screen loss")
+                self.state = State.HOME
+            return
+        if self._no_screen_stage == 1 and blind >= NO_FRAME_LD_RESTART:
+            self._no_screen_stage = 2
+            self._event("ldplayer_restart", f"{blind:.0f}s without a frame")
+            self._restart_ldplayer()
+            deadline = time.time() + 90
+            while time.time() < deadline:
+                self._heartbeat()
+                self.adb._connect()
+                if self.adb.device:
+                    break
+                time.sleep(3)
+            if self.adb.device:
+                self.adb.wait_boot_completed()
+                self.adb.ensure_resolution(1600, 900)
+                self._restart_game("after LDPlayer restart (no frames)")
+                self.state = State.HOME
+            # Give the restarted emulator a fresh 5-minute window before escalating again;
+            # if it never recovers, supervisor.py restarts the whole bot (FRAME_TIMEOUT).
+            self._last_good_frame = time.time() - NO_FRAME_RECONNECT
+            self._no_screen_stage = 1
+            return
+        if self.adb.device is None:
+            # Disconnected: keep polling 'adb connect' (cheap, never resets the server).
+            self.adb._connect()
+            time.sleep(3)
+
     # ── Run bookkeeping: heartbeat, events, restarts ─────────────────────────
     def _heartbeat(self, force=False):
         """Touch logs/heartbeat.txt so supervisor.py can tell a live bot from a hung
@@ -369,7 +376,9 @@ class RR2Bot:
         try:
             tmp = HEARTBEAT_PATH + ".tmp"
             with open(tmp, "w", encoding="utf-8") as f:
-                f.write(f"{now:.0f} {self.state}\n")
+                # "<now> <state> <last good frame>" — supervisor.py restarts the bot if
+                # either the heartbeat itself or the last good frame gets too old.
+                f.write(f"{now:.0f} {self.state} {self._last_good_frame:.0f}\n")
             os.replace(tmp, HEARTBEAT_PATH)
         except PermissionError:
             # Windows refuses the replace while supervisor.py has the file open for its
@@ -382,6 +391,9 @@ class RR2Bot:
         """Long wait that keeps the heartbeat alive (Break Time, update installs)."""
         end = time.time() + seconds
         while self.running and time.time() < end:
+            # A deliberate wait counts as progress: keeps supervisor.py's
+            # "no frame for 10 min" rule from killing the bot during Break Time.
+            self._last_good_frame = time.time()
             self._heartbeat(force=True)
             time.sleep(min(10, max(0, end - time.time())))
 
@@ -1208,7 +1220,6 @@ class RR2Bot:
     def _cof_tap_home(self):
         now = time.time()
         self._match_count += 1
-        self._last_restart_match_count += 1
         loop_dur  = now - self._loop_start
         total_secs = int(now - self._start_time)
         self._loop_start = now
