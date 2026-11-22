@@ -74,6 +74,7 @@ ARCHER_COORDS      = (200, 800)
 SECOND_TROOP_SLOT_COORDS      = (240, 800)
 ATTACK_TEXT_REGION  = (1180, 744, 1305, 777)  # OCR region for yellow "ATTACK!" text
 ATTACK_BTN_COORDS  = (1242, 760)              # center of the yellow attack button
+ATTACK_BTN_COLOR_REGION = (1100, 740, 1380, 830)  # inside the ATTACK! button: yellow vs gray
 MINUS_LEFT_COORDS  = (810, 226)
 MINUS_RIGHT_COORDS = (1084, 226)
 PLUS_LEFT_COORDS   = (985, 229)
@@ -671,24 +672,51 @@ class RR2Bot:
         return None
 
     # ── Helper: is the attack-prep screen showing? ────────────────────────────
+    def _attack_button_color(self, screen):
+        """'yellow', 'gray' or None from the mean HSV saturation inside the ATTACK!
+        button. Measured on 12.9.0: yellow ~138, gray (inactive / unattackable
+        opponent) 0. Text and shape can't tell them apart: OCR reads "ATTACK!" on
+        both and the template scores the gray button 0.87 — which once made the bot
+        press a dead gray button in an endless ATTACK_PREP ↔ GAME_LOAD loop."""
+        x1, y1, x2, y2 = ATTACK_BTN_COLOR_REGION
+        patch = screen[y1:y2, x1:x2]
+        if patch.size == 0:
+            return None
+        sat = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV)[:, :, 1].mean()
+        if sat >= 80:
+            return "yellow"
+        if sat <= 20:
+            return "gray"
+        return None
+
+    def _attack_button_present(self, screen):
+        """The ATTACK! button (either colour) is on screen: region template first
+        (~5 ms), OCR of its text (~300 ms) as the fallback."""
+        if self.vision.find_template(screen, "btn_attack_start", threshold=0.80):
+            return True
+        return "attack" in self.vision.read_region_text(screen, *ATTACK_TEXT_REGION)
+
     def _has_yellow_attack(self, screen):
-        """True if the yellow ATTACK! button is visible. Region template first (~5 ms,
-        scored 0.97 on 12.9.0); OCR of the button text (~300 ms) only as the fallback."""
+        """True if the ATTACK! button is visible AND yellow (opponent attackable)."""
         if screen is None:
             return False
-        if self.vision.find_template(screen, "btn_attack_start", threshold=0.90):
+        return self._attack_button_color(screen) == "yellow" and self._attack_button_present(screen)
+
+    def _has_gray_attack(self, screen):
+        """True if the ATTACK! button is visible but gray: "This player is inactive."
+        or the trophy gap makes the opponent unattackable. Also accepts the older small
+        btn_attack_start_gray template."""
+        if screen is None:
+            return False
+        if self.vision.find_template(screen, "btn_attack_start_gray", threshold=0.90):
             return True
-        text = self.vision.read_region_text(screen, *ATTACK_TEXT_REGION)
-        return "attack" in text
+        return self._attack_button_color(screen) == "gray" and self._attack_button_present(screen)
 
     def _on_attack_prep_screen(self, screen):
         """True if either the yellow or gray attack button is visible."""
         if screen is None:
             return False
-        return bool(
-            self._has_yellow_attack(screen)
-            or self.vision.find_template(screen, "btn_attack_start_gray", threshold=0.85)
-        )
+        return bool(self._has_yellow_attack(screen) or self._has_gray_attack(screen))
 
     # ── Helper: leave attack prep ─────────────────────────────────────────────
     def _leave_attack_prep(self, reason, permanent=False):
@@ -947,9 +975,10 @@ class RR2Bot:
     def handle_attack_prep(self, screen):
         # Unattackable opponent: the attack button renders gray instead of yellow.
         # Check this FIRST so we back out in one loop instead of waiting out 12s.
-        if self.vision.find_template(screen, "btn_attack_start_gray", threshold=0.90):
+        if self._has_gray_attack(screen):
             self._anchor_miss_streak = 0
-            self._leave_attack_prep("Attack button is gray (unattackable)", permanent=True)
+            self._event("opponent_unattackable", f"gray ATTACK button ({self._current_target})")
+            self._leave_attack_prep("Attack button is gray (inactive/unattackable)", permanent=True)
             return
 
         if self._has_yellow_attack(screen):
