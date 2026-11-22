@@ -25,6 +25,10 @@ Uzun, gözetimsiz çalışma için sağlamlık sürümü (Yol Haritası Faz 0).
   bot artık 90 sn sonra yeniden bağlanıyor, 5 dk sonra LDPlayer'ı yeniden başlatıyor. Eski "1 saat + 20 maç" şartı
   kaldırıldı; bu şart botu sonsuza kadar kör bırakabiliyordu. Supervisor da 10 dk boyunca hiç ekran gelmezse botu
   yeniden başlatıyor. LDPlayer açıldıktan sonra Android açılışının bitmesi bekleniyor.
+- **Chamber of Fortune "Better luck next time":** GIVE UP butonu yanlış bölgede aranıyordu; bot 90 sn takılıp
+  oyunu yeniden başlatıyordu. Düzeltildi (yanındaki 15 elmaslık TRY AGAIN'e asla basılmaz).
+- **Supervisor:** heartbeat dosyası tam yazılırken okunamadığında botu gereksiz yere öldürüyordu; artık tek seferlik
+  okuma hatası yok sayılıyor. `tools/report.py` Türkçe Windows konsolunda çöküyordu, düzeltildi.
 - **Hata düzeltmeleri:** LDPlayer yeniden başlatma süresinin hiç sıfırlanmaması (yazım hatası), bağlantı kopma
   mesajındaki sıfıra bölme.
 - **Kurulum:** `uv` ile (`pyproject.toml`); `requirements.txt` eski yöntem için duruyor.

@@ -26,8 +26,9 @@ Ana döngü (`RR2Bot.loop`), her turda:
 
 - `vision.DEFAULT_REGIONS`: şablon adı → (x1, y1, x2, y2). `find_template(..., region=None)` varsayılan bölgeyi
   kullanır; `region=FULL` tam ekran. Bölgesi olmayan şablon tam ekranda aranır (~330 ms).
-- Bölgeler 2026-11-21'de oyun 12.9.0 / LDPlayer'da gözlenen konumlar + ~60 px pay. Bazıları (COF butonları,
-  sandıklar, take_me_back) eski WIP koordinatlarından türetildi; canlıda doğrulanmadı.
+- Bölgeler 2026-11-21'de oyun 12.9.0 / LDPlayer'da gözlenen konumlar + ~60 px pay. 2026-11-22 canlı doğrulandı:
+  btn_melt, chest_4..6, btn_give_up ((426,491); ilk tahmin yanlıştı ve COF döngüsünü kilitliyordu).
+  `btn_sell` canlıda hiç görülmedi → bölgesi yok, tam ekran aranır. take_me_back, chest_1..3 doğrulanmadı.
 - `_find_state` bilerek `FULL` kullanır: buton bölgesinden kaymışsa bile yedek tarama bulabilsin.
 - Oyun güncellemesinden sonra: `uv run python tools/check_regions.py fail_debug <yeni ekranlar>`.
   "!!" satırı = şablon tam ekranda bulunuyor ama bölgede bulunmuyor → bölgeyi düzelt.
@@ -77,11 +78,13 @@ Ana döngü (`RR2Bot.loop`), her turda:
   eşleşmeler. Şablonlar 12.9.0'da 0.93–1.00 tutuyor; tespit için şablon tercih et.
 - **Git Bash'te `adb` yolları:** `MSYS_NO_PATHCONV=1` olmadan `/sdcard/...` bozulur.
 - **ADB maliyetleri:** `screencap -p` ~1.2 sn, `input tap` ~234 ms. Hızlandırma Faz 2 (scrcpy).
+- **Supervisor heartbeat okuması** bot dosyayı değiştirirken anlık başarısız olabilir; tek hata öldürme sebebi değil.
 - `_connect()` 127.0.0.1:5555 bağlanmadan `emulator-5554`'e düşebilir; aynı LDPlayer örneği, sorun değil.
 
 ## 6. Açık işler
 
 - Faz 0 çıktısı: 24 saatlik gözetimli koşu + `tools/report.py` raporu.
 - `btn_king_claim`, `btn_archer_boosted` şablonları yakalanmadı (ekran görüntüsü yok).
-- COF (sandık/sat/erit/pes et) bölgeleri canlıda doğrulanmadı; ilk koşunun `check_regions` sonucuyla kontrol et.
+- `btn_sell` konumu: ilk görüldüğünde (fail_debug) bölge ekle.
+- Maç sonu altın OCR'ı tutarsız olabilir (ardışık maçlarda 1.09M → 0.96M → 2.31M); incele.
 - Faz 1-4: `YOL_HARITASI.md`.

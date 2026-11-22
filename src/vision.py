@@ -37,8 +37,12 @@ DEFAULT_REGIONS = {
     "btn_attack_start_gray": (1000, 650, 1480, 900),
     "btn_archer":            (0, 580, 300, 850),
     "btn_continue":          (900, 680, 1340, 890),
-    "btn_give_up":           (870, 660, 1390, 900),
-    "btn_sell":              (330, 540, 870, 770),
+    # COF "Better luck next time" dialog: GIVE UP seen at (426, 491) live on 2026-11-22.
+    # Wide row box on purpose — the dialog's buttons may sit elsewhere in other variants.
+    # (The first guess here, copied from old WIP coords, was CONTINUE's spot and made
+    # the COF loop time out.)
+    "btn_give_up":           (150, 380, 1450, 620),
+    # btn_sell: position never observed live yet → no default region (whole screen).
     "btn_melt":              (370, 230, 680, 540),
     "btn_take_me_back":      (540, 380, 1090, 620),
     "chest_1":               (190, 170, 540, 490),
