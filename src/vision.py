@@ -11,7 +11,50 @@ pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tessera
 NAME_REGION = (-705, -20, 525, 40)
 
 # Templates in this set will NOT print "not found" messages (polled every loop)
-SILENT_ON_MISS = {"btn_continue", "btn_melt"}
+SILENT_ON_MISS = {
+    "btn_continue", "btn_melt", "btn_retreat",
+    "popup_break_time", "popup_update", "title_shop", "text_downloading",
+}
+
+# Pass region=FULL to force a whole-screen search (e.g. the _find_state fallback).
+FULL = "full"
+
+# Default search region per template, (x1, y1, x2, y2) on the 1600x900 screen.
+# A whole-screen match costs ~330 ms; a region of a few hundred pixels ~5-10 ms.
+# Each box is the button's observed position (game 12.9.0, LDPlayer, 2026-11-21)
+# padded generously (~60 px beyond the template on every side), so small layout
+# shifts still match. Templates not listed here are searched on the whole screen.
+# Verify after a game update with: uv run python tools/check_regions.py <screenshot dirs>
+DEFAULT_REGIONS = {
+    "icon_forge":            (75, 512, 275, 710),
+    "icon_trophy":           (1452, 40, 1600, 224),
+    "btn_close":             (1400, 0, 1600, 200),
+    "btn_green_back":        (1300, 0, 1510, 200),
+    "btn_collect_league":    (700, 640, 1400, 900),
+    "btn_start_search":      (500, 680, 1120, 900),
+    "area_top_opponent":     (1330, 200, 1510, 900),
+    "btn_attack_start":      (1000, 650, 1480, 860),
+    "btn_attack_start_gray": (1000, 650, 1480, 900),
+    "btn_archer":            (0, 580, 300, 850),
+    "btn_continue":          (900, 680, 1340, 890),
+    "btn_give_up":           (870, 660, 1390, 900),
+    "btn_sell":              (330, 540, 870, 770),
+    "btn_melt":              (370, 230, 680, 540),
+    "btn_take_me_back":      (540, 380, 1090, 620),
+    "chest_1":               (190, 170, 540, 490),
+    "chest_2":               (610, 170, 980, 490),
+    "chest_3":               (1020, 170, 1410, 490),
+    "chest_4":               (190, 540, 540, 900),
+    "chest_5":               (610, 540, 980, 900),
+    "chest_6":               (1020, 540, 1410, 900),
+    # Phase 0 additions (cropped from saved screenshots)
+    "popup_break_time":      (580, 290, 1110, 490),
+    "popup_update":          (580, 270, 1110, 510),
+    "btn_retreat":           (920, 640, 1340, 860),
+    "title_shop":            (0, 0, 260, 190),
+    "text_downloading":      (480, 520, 900, 700),
+    # btn_play_update lives in the Play Store, whose layout we don't control: full screen.
+}
 
 
 class VisionInterpreter:
@@ -35,34 +78,59 @@ class VisionInterpreter:
                 self.templates[name] = cv2.imread(path)
         print(f"[VISION] {len(self.templates)} templates loaded: {self.template_dir}")
 
-    def find_template(self, screen, template_name, threshold=0.98):
-        """Return center (x, y) of the best match, or None if below threshold."""
+    @staticmethod
+    def _search_area(screen, template, template_name, region):
+        """Resolve the region to search: explicit box, FULL, or the template's default.
+        Returns (area, ox, oy) or (None, 0, 0) if the box can't hold the template."""
+        if region is None:
+            region = DEFAULT_REGIONS.get(template_name)
+        if region is None or region == FULL:
+            return screen, 0, 0
+        h, w = screen.shape[:2]
+        x1, y1, x2, y2 = region
+        x1, y1, x2, y2 = max(0, x1), max(0, y1), min(w, x2), min(h, y2)
+        th, tw = template.shape[:2]
+        if x2 - x1 < tw or y2 - y1 < th:
+            return None, 0, 0
+        return screen[y1:y2, x1:x2], x1, y1
+
+    def find_template(self, screen, template_name, threshold=0.98, region=None):
+        """Return center (x, y) of the best match, or None if below threshold.
+        region: None = template's default region (whole screen if it has none),
+        FULL = whole screen, or an explicit (x1, y1, x2, y2) box."""
         if template_name not in self.templates or screen is None:
             return None
         template = self.templates[template_name]
         if template is None:
             return None
+        area, ox, oy = self._search_area(screen, template, template_name, region)
+        if area is None:
+            return None
 
-        res = cv2.matchTemplate(screen, template, cv2.TM_CCOEFF_NORMED)
+        res = cv2.matchTemplate(area, template, cv2.TM_CCOEFF_NORMED)
         _, max_val, _, max_loc = cv2.minMaxLoc(res)
 
         if max_val >= threshold:
             h, w = template.shape[:2]
-            center_x = max_loc[0] + w // 2
-            center_y = max_loc[1] + h // 2
+            center_x = ox + max_loc[0] + w // 2
+            center_y = oy + max_loc[1] + h // 2
             print(f"[VISION] {template_name} found (max={max_val:.3f}, threshold={threshold})")
             return (center_x, center_y)
         if template_name not in SILENT_ON_MISS:
             print(f"[VISION] {template_name} not found (max={max_val:.3f}, threshold={threshold})")
         return None
 
-    def find_multiple_templates(self, screen, template_name, threshold=0.99):
-        """Return list of (x, y) for all non-overlapping matches above threshold."""
+    def find_multiple_templates(self, screen, template_name, threshold=0.99, region=None):
+        """Return list of (x, y) for all non-overlapping matches above threshold.
+        region: same meaning as in find_template."""
         if template_name not in self.templates or screen is None:
             return []
         template = self.templates[template_name]
+        area, ox, oy = self._search_area(screen, template, template_name, region)
+        if area is None:
+            return []
 
-        res = cv2.matchTemplate(screen, template, cv2.TM_CCOEFF_NORMED)
+        res = cv2.matchTemplate(area, template, cv2.TM_CCOEFF_NORMED)
         _, max_val, _, _ = cv2.minMaxLoc(res)
         locs = np.where(res >= threshold)
 
@@ -70,7 +138,7 @@ class VisionInterpreter:
         centers = []
         for pt in zip(*locs[::-1]):
             val = float(res[pt[1], pt[0]])
-            centers.append((pt[0] + w // 2, pt[1] + h // 2, val))
+            centers.append((ox + pt[0] + w // 2, oy + pt[1] + h // 2, val))
 
         if not centers:
             print(f"[VISION] {template_name} (multi) not found (max={max_val:.3f}, threshold={threshold})")

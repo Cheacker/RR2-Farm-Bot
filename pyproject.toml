@@ -1,0 +1,15 @@
+[project]
+name = "rr2-farm-bot"
+version = "0.2.0"
+description = "ADB-based farm bot for Royal Revolt 2 on LDPlayer"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "adbutils",
+    "numpy",
+    "opencv-python",
+    "pytesseract",
+]
+
+[tool.uv]
+package = false

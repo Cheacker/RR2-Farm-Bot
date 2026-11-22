@@ -10,3 +10,5 @@ captured_inactives/
 .zipmem/
 CLAUDE.md
 dev_tools/
+logs/
+.venv/

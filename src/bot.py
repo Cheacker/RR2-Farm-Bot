@@ -1,16 +1,29 @@
 import time
 import os
+import sys
+import csv
 import glob
 import argparse
 import subprocess
 import cv2
 import numpy as np
 from controller import ADBController
-from vision import VisionInterpreter
+from vision import VisionInterpreter, FULL
 from player_db import PlayerDB
 
-FAIL_DEBUG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "fail_debug")
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+FAIL_DEBUG_DIR = os.path.join(ROOT_DIR, "fail_debug")
 os.makedirs(FAIL_DEBUG_DIR, exist_ok=True)
+
+# Persistent run records (gitignored). Unlike session_log.txt these are appended
+# across runs, so a 24h+ run can be reviewed afterwards with tools/report.py.
+LOG_DIR        = os.path.join(ROOT_DIR, "logs")
+os.makedirs(LOG_DIR, exist_ok=True)
+MATCHES_CSV    = os.path.join(LOG_DIR, "matches.csv")   # one row per finished match
+EVENTS_CSV     = os.path.join(LOG_DIR, "events.csv")    # restarts, popups, recoveries
+HEARTBEAT_PATH = os.path.join(LOG_DIR, "heartbeat.txt") # watched by supervisor.py
+HEARTBEAT_EVERY = 2  # seconds between heartbeat writes
+KEEP_RUN_LOGS   = 30 # bot_*.log files kept in logs/
 
 CAPTURED_INACTIVES_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "captured_inactives")
 os.makedirs(CAPTURED_INACTIVES_DIR, exist_ok=True)
@@ -70,7 +83,21 @@ GEAR_SET_1_COORDS  = (226, 818)
 GEAR_SET_2_COORDS  = (298, 820)
 GEAR_SET_3_COORDS  = (366, 818)
 VIDEO_CLOSE_COORDS = (1522, 94)
+POPUP_CLOSE_COORDS = (1520, 88)    # red X shared by every full-screen popup/offer and the Shop
 SHOP_COORDS        = (1540, 508)
+TRY_AGAIN_COORDS   = (810, 505)    # "Try again!" on the Break Time popup
+UPDATE_DOWNLOAD_COORDS = (810, 522)  # "Download now!" on the forced-update popup
+PLAY_STORE_PACKAGE = "com.android.vending"
+
+# Break Time: the game stops you after ~5h of play for ~15 min (user's observation).
+BREAK_WAIT        = 15 * 60  # first wait after the popup appears
+BREAK_RETRY_WAIT  = 5 * 60   # extra wait if the popup is still there after "Try again!"
+UPDATE_TIMEOUT    = 10 * 60  # max wait for the Play Store to install a forced update
+INTERRUPT_CHECK_EVERY_IN_GAME = 3  # seconds; full-screen popups are rare mid-match
+
+# Templates bot.py references that may legitimately be missing (no screenshot of
+# that screen yet). Reported once at startup instead of failing silently.
+OPTIONAL_TEMPLATES = ["btn_king_claim", "btn_archer_boosted", "btn_attack_start_gray"]
 GREEN_BACK_COORDS  = (1430, 85)    # back out of attack prep / loading screen
 SCROLL_CONFIRM_COORDS = (896, 785) # ranked-list confirm after scroll — on the
                                    # attack-prep screen this is "New Opponent",
@@ -105,19 +132,23 @@ class RR2Bot:
         # Skip ADBController's own connect-on-init: connecting before the startup
         # restart even runs is wasted work whose result gets thrown away the
         # instant the restart happens -- only try after the restart completes.
+        self._last_heartbeat = 0
+        self.state = State.HOME
+        self._heartbeat(force=True)  # supervisor.py counts startup (LDPlayer restart) from here
         self.adb = ADBController(port=port, connect_on_init=False)
         self._ld_index = ld_index
         self._ldconsole = ldconsole or find_ldconsole()
         self._startup_restart_ldplayer()
         if not self.adb.device:
             print("ADB connection failed. Start LDPlayer manually and re-run.")
-            exit(1)
+            self._event("startup_failed", "no ADB device after LDPlayer restart")
+            sys.exit(1)
         self.adb.ensure_resolution(1600, 900)
         self.vision = VisionInterpreter(template_dir=template_dir)
-        if "btn_attack_start_gray" not in self.vision.templates:
-            print("[WARN] btn_attack_start_gray.png missing — unattackable opponents "
-                  "will only be caught by the 12s timeout. Capture it with: "
-                  "python recrop.py → option 25")
+        missing = [t for t in OPTIONAL_TEMPLATES if t not in self.vision.templates]
+        if missing:
+            print(f"[WARN] Optional templates not captured yet (their checks are skipped): "
+                  f"{', '.join(missing)}")
         if drop_trophies and not (OWN_TROPHY_REGION and DROP_BUTTON_1_COORDS
                                    and DROP_BUTTON_2_COORDS and DROP_HOME_COORDS):
             print("[WARN] --drop-trophies is on but the drop-mode coordinates in bot.py "
@@ -162,6 +193,12 @@ class RR2Bot:
         self._capture_wait_start = 0
         self._scroll_no_progress = 0
         self._scroll_attempts    = 0
+        self._last_interrupt_check = 0
+        self._last_break_end     = 0
+        self._match_outcome      = None  # "continue" / "retreat" / ... written to matches.csv
+        self._hour_capture_count = 0
+        self._hour_capture_secs  = 0.0
+        self._hour_events        = 0
         self.db = PlayerDB()
 
         # Per-hour debug log — truncated (not appended) on every bot run, so it
@@ -210,16 +247,18 @@ class RR2Bot:
         subprocess.run([self._ldconsole, "quit", "--index", str(self._ld_index)], capture_output=True)
         time.sleep(3)
         self._last_restart_match_count = 0
-        self.last_restart_start_time = time.time()
+        self._last_restart_start_time = time.time()
         subprocess.Popen([self._ldconsole, "launch", "--index", str(self._ld_index)])
         time.sleep(15)
 
     # ── Main loop ─────────────────────────────────────────────────────────────
     def loop(self):
         print("Bot started! Press Ctrl+C to stop.")
+        self._event("bot_start", f"trophy_filter={self._trophy_filter} drop={self._drop_trophies}")
         self.adb.restart_game(RR2_PACKAGE, wait=RESTART_GAME_WAIT)
         while self.running:
             try:
+                self._heartbeat()
                 screen = self.adb.current_screen()
                 if screen is None:
                     self._screen_none_count += 1
@@ -230,14 +269,14 @@ class RR2Bot:
                         self.adb._connect()
                         if self.adb.device:
                             self.adb.ensure_resolution(1600, 900)
-                            self.adb.restart_game(RR2_PACKAGE, wait=RESTART_GAME_WAIT)
+                            self._restart_game("reconnected after screen loss")
                             self.state = State.HOME
                             continue
 
                         runtime = time.time() - self._last_restart_start_time
                         if runtime > LD_RESTART_MIN_RUNTIME and self._last_restart_match_count > LD_RESTART_MIN_MATCHES:
                             print(f"[LOOP] Still disconnected (runtime={runtime:.0f}s, "
-                                  f"matches={self._last_restart_match_count/self._match_count}) — polling {LD_RESTART_CONNECT_TIMEOUT}s "
+                                  f"matches={self._last_restart_match_count}) — polling {LD_RESTART_CONNECT_TIMEOUT}s "
                                   f"before restarting LDPlayer...")
                             deadline = time.time() + LD_RESTART_CONNECT_TIMEOUT
                             while time.time() < deadline:
@@ -246,6 +285,7 @@ class RR2Bot:
                                     break
                                 time.sleep(3)
                             if not self.adb.device:
+                                self._event("ldplayer_restart", f"disconnected, runtime={runtime:.0f}s")
                                 self._restart_ldplayer()
                                 deadline = time.time() + 90
                                 while time.time() < deadline:
@@ -255,16 +295,28 @@ class RR2Bot:
                                     time.sleep(3)
                             if self.adb.device:
                                 self.adb.ensure_resolution(1600, 900)
-                                self.adb.restart_game(RR2_PACKAGE, wait=RESTART_GAME_WAIT)
+                                self._restart_game("after LDPlayer restart")
                                 self.state = State.HOME
                         else:
                             print(f"[LOOP] Disconnected, but restart conditions not met yet (need "
                                   f"runtime>{LD_RESTART_MIN_RUNTIME}s and matches>{LD_RESTART_MIN_MATCHES}; "
-                                  f"have runtime={runtime:.0f}s, matches={self._last_restart_match_count/self._match_count}) — "
+                                  f"have runtime={runtime:.0f}s, matches={self._last_restart_match_count}) — "
                                   f"retrying the connection without touching LDPlayer.")
                     time.sleep(0.1)
                     continue
                 self._screen_none_count = 0
+
+                # Full-screen interrupts (Break Time, forced update, stray Shop, asset
+                # download) can appear on top of any state. Checked before the state
+                # handler so no handler blind-taps its own coordinates onto them.
+                # Each check is a small-region template match (~5-10 ms); mid-match it
+                # only runs every few seconds to keep the in-game tap rhythm.
+                now = time.time()
+                if (self.state != State.IN_GAME
+                        or now - self._last_interrupt_check >= INTERRUPT_CHECK_EVERY_IN_GAME):
+                    self._last_interrupt_check = now
+                    if self._check_interrupts(screen):
+                        continue
 
                 if   self.state == State.HOME:               self.handle_home(screen)
                 elif self.state == State.TROPHY_MENU:        self.handle_trophy_menu(screen)
@@ -306,6 +358,169 @@ class RR2Bot:
                 print(f"Error: {e}")
                 time.sleep(0.5)
 
+    # ── Run bookkeeping: heartbeat, events, restarts ─────────────────────────
+    def _heartbeat(self, force=False):
+        """Touch logs/heartbeat.txt so supervisor.py can tell a live bot from a hung
+        one. Written atomically (tmp + replace) so the supervisor never reads half a line."""
+        now = time.time()
+        if not force and now - self._last_heartbeat < HEARTBEAT_EVERY:
+            return
+        self._last_heartbeat = now
+        try:
+            tmp = HEARTBEAT_PATH + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write(f"{now:.0f} {self.state}\n")
+            os.replace(tmp, HEARTBEAT_PATH)
+        except PermissionError:
+            # Windows refuses the replace while supervisor.py has the file open for its
+            # (millisecond) read. Harmless: the next write, 2 s later, goes through.
+            self._last_heartbeat = 0
+        except OSError as e:
+            print(f"[HEARTBEAT] write failed: {e}")
+
+    def _sleep(self, seconds):
+        """Long wait that keeps the heartbeat alive (Break Time, update installs)."""
+        end = time.time() + seconds
+        while self.running and time.time() < end:
+            self._heartbeat(force=True)
+            time.sleep(min(10, max(0, end - time.time())))
+
+    def _event(self, kind, detail=""):
+        """Append one row to logs/events.csv — every recovery, popup and restart, so a
+        long unattended run can be audited afterwards (tools/report.py)."""
+        print(f"[EVENT] {kind}: {detail}")
+        self._hour_events = getattr(self, "_hour_events", 0) + 1
+        try:
+            new = not os.path.exists(EVENTS_CSV)
+            with open(EVENTS_CSV, "a", newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
+                if new:
+                    w.writerow(["time", "kind", "state", "match", "detail"])
+                w.writerow([time.strftime("%Y-%m-%d %H:%M:%S"), kind, self.state,
+                            getattr(self, "_match_count", 0), detail])
+        except OSError as e:
+            print(f"[EVENT] write failed: {e}")
+
+    def _restart_game(self, reason=None):
+        """restart_game + an events.csv row saying why (defaults to the calling handler)."""
+        if reason is None:
+            reason = sys._getframe(1).f_code.co_name
+        shot = self._save_debug_screen(reason)
+        self._event("game_restart", f"{reason}{f' [{os.path.basename(shot)}]' if shot else ''}")
+        self.adb.restart_game(RR2_PACKAGE, wait=RESTART_GAME_WAIT)
+
+    def _save_debug_screen(self, reason):
+        """Save the screen that led to a recovery into fail_debug/, so every restart
+        can be diagnosed afterwards (and turned into a template / test case)."""
+        frame = self.adb.current_screen(retries=1) if self.adb.device else None
+        if frame is None:
+            return None
+        slug = "".join(c if c.isalnum() else "_" for c in reason)[:50].strip("_")
+        path = os.path.join(FAIL_DEBUG_DIR, f"{time.strftime('%Y%m%d_%H%M%S')}_{slug}.png")
+        try:
+            cv2.imwrite(path, frame)
+            return path
+        except Exception as e:
+            print(f"[DEBUG] screenshot save failed: {e}")
+            return None
+
+    # ── Full-screen interrupts (any state) ───────────────────────────────────
+    def _check_interrupts(self, screen):
+        """Handle screens that can cover any state. Returns True if one was handled
+        (the caller then grabs a fresh frame instead of running the state handler)."""
+        if self.vision.find_template(screen, "popup_break_time", threshold=0.85):
+            self._handle_break_time()
+            return True
+        if self.vision.find_template(screen, "popup_update", threshold=0.85):
+            self._handle_forced_update()
+            return True
+        if self.vision.find_template(screen, "text_downloading", threshold=0.85):
+            # Post-update asset download on the loading screen: progress, not a hang.
+            # Reset the miss counters so HOME's 21-miss rule doesn't restart mid-download.
+            print("[INTERRUPT] Game is downloading assets — waiting...")
+            self._trophy_miss_count = 0
+            self._anchor_miss_streak = 0
+            self._sleep(5)
+            return True
+        if self.vision.find_template(screen, "title_shop", threshold=0.85):
+            # Stray Shop (e.g. a mis-tap on HOME). Several of its buttons spend gems, so
+            # close it right away instead of letting a handler tap its own coordinates here.
+            self._event("shop_closed", f"Shop open while in {self.state}")
+            self.adb.tap(*POPUP_CLOSE_COORDS)
+            time.sleep(1)
+            if self.state not in (State.HOME, State.IN_GAME):
+                self.state = State.HOME
+            return True
+        return False
+
+    def _handle_break_time(self):
+        """'You've been playing for a while' — wait it out, then 'Try again!'. A popup
+        that is still there right after a retry only gets the shorter extra wait."""
+        retry = time.time() - self._last_break_end < 120
+        wait = BREAK_RETRY_WAIT if retry else BREAK_WAIT
+        self._event("break_time", f"{'still on break, ' if retry else ''}waiting {wait // 60} min")
+        self._sleep(wait)
+        self.adb.tap(*TRY_AGAIN_COORDS)
+        self._last_break_end = time.time()
+        self._sleep(RESTART_GAME_WAIT)
+        self._trophy_miss_count = 0
+        self._anchor_miss_streak = 0
+        self.state = State.HOME
+
+    def _handle_forced_update(self):
+        """'A brand new update' popup blocks the game entirely until updated."""
+        old = self.adb.package_version(RR2_PACKAGE)
+        self._event("forced_update", f"installed version {old}")
+        self.adb.tap(*UPDATE_DOWNLOAD_COORDS)  # "Download now!" → opens the Play Store page
+        self._play_store_update(old)
+
+    def _play_store_update(self, old_version):
+        """On the game's Play Store page: tap Update, wait for the new version, relaunch.
+        Any failure ends in a plain game restart, never in a stuck Play Store."""
+        deadline = time.time() + 20
+        while time.time() < deadline and self.adb.focused_package() != PLAY_STORE_PACKAGE:
+            self._sleep(2)
+        tapped = False
+        if self.adb.focused_package() == PLAY_STORE_PACKAGE:
+            for _ in range(10):
+                f = self.adb.current_screen()
+                btn = self.vision.find_template(f, "btn_play_update", threshold=0.85, region=FULL)
+                if btn:
+                    self.adb.tap(*btn)
+                    tapped = True
+                    break
+                self._sleep(2)
+        if tapped:
+            deadline = time.time() + UPDATE_TIMEOUT
+            while self.running and time.time() < deadline:
+                self._sleep(10)
+                version = self.adb.package_version(RR2_PACKAGE)
+                if version and version != old_version:
+                    self._event("update_installed", f"{old_version} -> {version}")
+                    break
+            else:
+                self._event("update_failed", f"no new version after {UPDATE_TIMEOUT // 60} min")
+        else:
+            self._event("update_failed", "Play Store 'Update' button not found")
+        self.adb.force_stop(PLAY_STORE_PACKAGE)
+        self._restart_game("after forced update")
+        self.state = State.HOME
+
+    def _check_foreground(self):
+        """The game may not be on screen at all (crash to the Android launcher, Play
+        Store or a browser opened by an offer). Costs one ADB call, so only used from
+        HOME's periodic miss checks. Returns True if it acted."""
+        pkg = self.adb.focused_package()
+        if pkg is None or pkg == RR2_PACKAGE:
+            return False
+        if pkg == PLAY_STORE_PACKAGE:
+            self._event("play_store_in_front", "trying the update flow")
+            self._play_store_update(self.adb.package_version(RR2_PACKAGE))
+        else:
+            self._restart_game(f"game not in foreground ({pkg})")
+            self.state = State.HOME
+        return True
+
     # ── HOME ──────────────────────────────────────────────────────────────────
     def handle_home(self, screen):
         print("[HOME] Searching for forge icon...")
@@ -335,7 +550,7 @@ class RR2Bot:
             if self._trophy_miss_count > 21:
                 print(f"[HOME] Forge not found after {self._trophy_miss_count} attempts — restarting game...")
                 self._trophy_miss_count = 0
-                self.adb.restart_game(RR2_PACKAGE, wait=RESTART_GAME_WAIT)
+                self._restart_game("HOME: forge icon not found 21x")
                 self.state = State.HOME
                 return
 
@@ -344,6 +559,10 @@ class RR2Bot:
             # these are uncommon enough that scanning for them on every single miss
             # would just be wasted vision work.
             if self._trophy_miss_count % 10 == 0:
+                if self._check_foreground():
+                    self._trophy_miss_count = 0
+                    self._anchor_miss_streak = 0
+                    return
                 # 'Connected another device' popup uses the same button/template as
                 # GAME_LOAD's btn_take_me_back — checked here too since this popup can
                 # also interrupt at HOME.
@@ -384,17 +603,20 @@ class RR2Bot:
                 self.adb.tap(10, 10)
                 time.sleep(0.1)
 
+            # "JOIN LEAGUE!" (league result at startup) has no X, only this button.
+            # Region-limited now (~10 ms), so it's checked on every miss instead of
+            # every 10th — it's part of the popup chain right after every game start.
+            league = self.vision.find_template(screen, "btn_collect_league", threshold=0.80)
+            if league:
+                print(f"[HOME] {self._trophy_miss_count}th miss → pressing btn_collect_league...")
+                self.adb.tap(league[0], league[1])
+                time.sleep(1)
+
             if self._trophy_miss_count % 10 == 0:
                 btn_big_collect = self.vision.find_template(screen, "btn_big_collect", threshold=0.80)
                 if btn_big_collect:
                     print("[HOME] btn_big_collect found, tapping...")
                     self.adb.tap(btn_big_collect[0], btn_big_collect[1])
-                    time.sleep(1)
-
-                league = self.vision.find_template(screen, "btn_collect_league", threshold=0.80)
-                if league:
-                    print(f"[HOME] {self._trophy_miss_count}th miss → pressing btn_collect_league...")
-                    self.adb.tap(league[0], league[1])
                     time.sleep(1)
 
     # ── Helper: identify the actual screen from its anchor template(s) ───────
@@ -405,50 +627,45 @@ class RR2Bot:
         if screen is None:
             return None
 
-        # These two are full-screen blocking popups icon_forge can never see past.
-        # Dismissing them is handled here rather than in handle_home, since
-        # _find_state already runs as the general "figure out what's actually on
-        # screen" fallback -- finding one of these IS the answer, so act on it and
-        # report HOME rather than just detecting and leaving it for something else.
-        take_break = self.vision.find_template(screen, "btn_take_a_break", threshold=0.85)
-        if take_break:
-            print("[FIND_STATE] 'Take a break' popup detected — dismissing...")
-            self._log_to_file("'Take a break' popup detected — dismissing")
-            self.adb.tap(take_break[0], take_break[1])
-            time.sleep(30)
-            return State.HOME
-
-        king = self.vision.find_template(screen, "btn_king_claim", threshold=0.85)
+        # Break Time is handled by _check_interrupts on every loop, before any handler.
+        # "I am the King" has no captured template yet (btn_king_claim is optional);
+        # once captured this branch claims it.
+        king = self.vision.find_template(screen, "btn_king_claim", threshold=0.85, region=FULL)
         if king:
-            print("[FIND_STATE] 'I am the King' popup detected — claiming...")
+            self._event("king_claim", "claimed")
             self.adb.tap(king[0], king[1])
             time.sleep(RESTART_GAME_WAIT)
             return State.HOME
 
-        if (self.vision.find_template(screen, "icon_forge", threshold=0.90)
-                or self.vision.find_template(screen, "btn_take_me_back", threshold=0.85)):
+        # This is the rare fallback after repeated misses, so it deliberately searches
+        # the whole screen (region=FULL) — it must still work if a button has moved
+        # out of its default region after a game update.
+        if (self.vision.find_template(screen, "icon_forge", threshold=0.90, region=FULL)
+                or self.vision.find_template(screen, "btn_take_me_back", threshold=0.85, region=FULL)):
             return State.HOME
-        if self.vision.find_template(screen, "btn_start_search", threshold=0.80):
+        if self.vision.find_template(screen, "btn_start_search", threshold=0.80, region=FULL):
             return State.TROPHY_MENU
-        if self.vision.find_multiple_templates(screen, "area_top_opponent", threshold=0.90):
+        if self.vision.find_multiple_templates(screen, "area_top_opponent", threshold=0.90, region=FULL):
             return State.FILTERED_RANKS
         if self._on_attack_prep_screen(screen):
             return State.ATTACK_PREP
-        if (self.vision.find_template(screen, "btn_archer", threshold=0.85)
-                or self.vision.find_template(screen, "btn_archer_boosted", threshold=0.85)
-                or self.vision.find_template(screen, "btn_take_me_back", threshold=0.85)):
+        if (self.vision.find_template(screen, "btn_archer", threshold=0.85, region=FULL)
+                or self.vision.find_template(screen, "btn_archer_boosted", threshold=0.85, region=FULL)):
             return State.GAME_LOAD
-        if (self.vision.find_template(screen, "btn_give_up", threshold=0.70)
-                or self.vision.find_template(screen, "btn_sell", threshold=0.70)
+        if (self.vision.find_template(screen, "btn_give_up", threshold=0.70, region=FULL)
+                or self.vision.find_template(screen, "btn_sell", threshold=0.70, region=FULL)
                 or self._find_chests(screen)):
             return State.CHAMBER_OF_FORTUNE
         return None
 
     # ── Helper: is the attack-prep screen showing? ────────────────────────────
     def _has_yellow_attack(self, screen):
-        """OCR the attack button region — True if 'attack' text is visible."""
+        """True if the yellow ATTACK! button is visible. Region template first (~5 ms,
+        scored 0.97 on 12.9.0); OCR of the button text (~300 ms) only as the fallback."""
         if screen is None:
             return False
+        if self.vision.find_template(screen, "btn_attack_start", threshold=0.90):
+            return True
         text = self.vision.read_region_text(screen, *ATTACK_TEXT_REGION)
         return "attack" in text
 
@@ -632,7 +849,7 @@ class RR2Bot:
         if self._trophy_menu_miss >= 300:
             print(f"[TROPHY_MENU] Search button not found after {self._trophy_menu_miss} attempts — restarting game...")
             self._trophy_menu_miss = 0
-            self.adb.restart_game(RR2_PACKAGE, wait=RESTART_GAME_WAIT)
+            self._restart_game("TROPHY_MENU: search button not found 300x")
             self.state = State.HOME
             return
         time.sleep(0.15)
@@ -862,7 +1079,7 @@ class RR2Bot:
                 self.state = detected
                 return
             print(f"[GAME_LOAD] Still unresolved (detected={detected}) — restarting game...")
-            self.adb.restart_game(RR2_PACKAGE, wait=RESTART_GAME_WAIT)
+            self._restart_game("GAME_LOAD: nothing recognized 15x")
             self.state = State.HOME
             return
         print(f"[GAME_LOAD] Waiting... ({self._game_load_miss}/15)")
@@ -908,7 +1125,7 @@ class RR2Bot:
         if self._in_game_start > 0 and now - self._in_game_start > self._in_game_timeout:
             print(f"[IN_GAME] {self._in_game_timeout}s timeout — restarting game...")
             self._in_game_start = 0
-            self.adb.restart_game(RR2_PACKAGE, wait=RESTART_GAME_WAIT)
+            self._restart_game("IN_GAME: match timeout")
             self.state = State.HOME
             return
         if now - self._last_tap >= 1:
@@ -921,9 +1138,22 @@ class RR2Bot:
             continue_pos = self.vision.find_template(screen, "btn_continue", threshold=0.95)
             if continue_pos:
                 print("[IN_GAME] Match ended, going to result screen...")
+                if self._match_outcome is None:
+                    self._match_outcome = "finished"
                 self.adb.tap(continue_pos[0], continue_pos[1])
                 self.state = State.CHAMBER_OF_FORTUNE
                 time.sleep(1.25)
+                return
+            # Hero died: RESURRECT (36 gems) / USE TOKEN / RETREAT. Never resurrect —
+            # RETREAT ends the match and leads to the normal result screen (SKIP →
+            # CONTINUE), which the check above then picks up. Previously this screen
+            # sat untouched until the 3-minute timeout restarted the whole game.
+            retreat = self.vision.find_template(screen, "btn_retreat", threshold=0.85)
+            if retreat:
+                self._match_outcome = "hero_died"
+                self._event("hero_died", "tapping RETREAT")
+                self.adb.tap(*retreat)
+                time.sleep(1.5)
 
     # ── Session log helpers ───────────────────────────────────────────────────
     def _log_to_file(self, message):
@@ -945,10 +1175,34 @@ class RR2Bot:
             pearl_str = str(self._pearl_last - self._session_log_hour_pearl_start)
         else:
             pearl_str = "?"
+        caps = self.adb.capture_count - self._hour_capture_count
+        cap_secs = self.adb.capture_seconds - self._hour_capture_secs
+        cap_str = f"{cap_secs / caps * 1000:.0f} ms x {caps}" if caps else "?"
         self._log_to_file(
             f"Hour {self._session_log_hour_index + 1} summary — "
-            f"matches: {self._session_log_hour_matches}, avg loop: {avg_loop:.0f}s, pearls: {pearl_str}"
+            f"matches: {self._session_log_hour_matches}, avg loop: {avg_loop:.0f}s, pearls: {pearl_str}, "
+            f"screencap: {cap_str}, events: {self._hour_events}"
         )
+        self._hour_capture_count = self.adb.capture_count
+        self._hour_capture_secs  = self.adb.capture_seconds
+        self._hour_events        = 0
+
+    def _write_match_row(self, loop_dur):
+        """One row per finished match in logs/matches.csv (kept across runs)."""
+        try:
+            new = not os.path.exists(MATCHES_CSV)
+            with open(MATCHES_CSV, "a", newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
+                if new:
+                    w.writerow(["time", "match", "loop_s", "outcome", "gold", "pearls", "trophy_filter"])
+                w.writerow([time.strftime("%Y-%m-%d %H:%M:%S"), self._match_count, f"{loop_dur:.1f}",
+                            self._match_outcome or "unknown",
+                            "" if self._gold_last is None else self._gold_last,
+                            "" if self._pearl_last is None else self._pearl_last,
+                            self._trophy_filter])
+        except OSError as e:
+            print(f"[MATCHES] write failed: {e}")
+        self._match_outcome = None
 
     # ── COF helpers ───────────────────────────────────────────────────────────
     def _cof_tap_home(self):
@@ -973,6 +1227,7 @@ class RR2Bot:
         print("--------------------------------------------------------------------")
         print(f"[COF] Match #{self._match_count} | Loop: {loop_dur:.0f}s | Total: {total_str} | Avg: {total_secs/self._match_count:.0f}s{resources}")
         print("--------------------------------------------------------------------")
+        self._write_match_row(loop_dur)
 
         # Per-hour debug log: roll the bucket over whenever total elapsed time
         # crosses into a new hour, flushing a summary of the hour that just ended.
@@ -1019,7 +1274,7 @@ class RR2Bot:
         while self.running and self._chest_taps < 3:
             if time.time() - loop1_start > self._COF_LOOP_TIMEOUT:
                 print(f"[COF] Chest-opening loop stuck for {self._COF_LOOP_TIMEOUT}s — restarting game...")
-                self.adb.restart_game(RR2_PACKAGE, wait=RESTART_GAME_WAIT)
+                self._restart_game("COF: chest loop stuck 90s")
                 self.state = State.HOME
                 return
             time.sleep(0.1)
@@ -1069,7 +1324,7 @@ class RR2Bot:
         while self.running:
             if time.time() - loop2_start > self._COF_LOOP_TIMEOUT:
                 print(f"[COF] Post-chest loop stuck for {self._COF_LOOP_TIMEOUT}s — restarting game...")
-                self.adb.restart_game(RR2_PACKAGE, wait=RESTART_GAME_WAIT)
+                self._restart_game("COF: post-chest loop stuck 90s")
                 self.state = State.HOME
                 return
             time.sleep(0.1)
@@ -1106,7 +1361,56 @@ class RR2Bot:
                 return
 
 
+class _TeeLog:
+    """Mirror console output into logs/bot_<start>.log with a timestamp per line, so
+    an unattended run (or one restarted by supervisor.py) leaves a readable record."""
+
+    def __init__(self, console, path):
+        self._console = console
+        self._file = open(path, "a", encoding="utf-8", buffering=1)
+        self._at_line_start = True
+
+    def write(self, text):
+        try:
+            self._console.write(text)
+        except UnicodeEncodeError:
+            # A console/pipe in a legacy code page (cp1252) can't print "→" etc. —
+            # this used to raise inside every print() and wedge the main loop.
+            enc = getattr(self._console, "encoding", None) or "ascii"
+            self._console.write(text.encode(enc, errors="replace").decode(enc))
+        out = []
+        for chunk in text.splitlines(keepends=True):
+            if self._at_line_start:
+                out.append(time.strftime("%H:%M:%S "))
+            out.append(chunk)
+            self._at_line_start = chunk.endswith("\n")
+        self._file.write("".join(out))
+        return len(text)
+
+    def flush(self):
+        self._console.flush()
+        self._file.flush()
+
+
+def setup_run_log():
+    path = os.path.join(LOG_DIR, time.strftime("bot_%Y%m%d_%H%M%S.log"))
+    for old in sorted(glob.glob(os.path.join(LOG_DIR, "bot_*.log")))[:-(KEEP_RUN_LOGS - 1)]:
+        try:
+            os.remove(old)
+        except OSError:
+            pass
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
+    sys.stdout = _TeeLog(sys.stdout, path)
+    sys.stderr = _TeeLog(sys.stderr, path)
+    print(f"[LOG] Console output is also written to {path}")
+
+
 if __name__ == "__main__":
+    setup_run_log()
     parser = argparse.ArgumentParser(description="Royal Revolt 2 Farm Bot")
     parser.add_argument("--port", type=int, default=5555,
                         help="ADB port of the LDPlayer instance (default: 5555, the first instance). "

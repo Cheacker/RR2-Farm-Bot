@@ -4,6 +4,8 @@ import numpy as np
 import time
 import subprocess
 
+SHELL_TIMEOUT = 10  # seconds; any single ADB shell command taking longer is treated as a wedged socket
+
 
 class ADBController:
     def __init__(self, serial=None, port=21503, connect_on_init=True):
@@ -12,6 +14,8 @@ class ADBController:
         self.adb     = adbutils.AdbClient(host="127.0.0.1", port=5037)
         self.device  = None
         self.last_capture_error = None
+        self.capture_count = 0      # screencaps taken, for the hourly timing summary
+        self.capture_seconds = 0.0  # total time spent in them
         if connect_on_init:
             self._connect()
 
@@ -85,14 +89,14 @@ class ADBController:
             return
         target = f"{width}x{height}"
         try:
-            out = self.device.shell("wm size").strip()
+            out = self._sh("wm size").strip()
             if target in out:
                 print(f"[ADB] Resolution OK ({out})")
                 return
             print(f"[ADB] Resolution mismatch ({out}) — forcing {target}...")
-            self.device.shell(f"wm size {target}")
+            self._sh(f"wm size {target}")
             time.sleep(1)
-            out2 = self.device.shell("wm size").strip()
+            out2 = self._sh("wm size").strip()
             print(f"[ADB] Resolution now: {out2}")
         except Exception as e:
             print(f"[ADB] Failed to set resolution: {e}")
@@ -103,11 +107,14 @@ class ADBController:
         self.last_capture_error = None
         for attempt in range(retries):
             try:
+                t0 = time.perf_counter()
                 img_bytes = self.device.shell("screencap -p", encoding=None, timeout=15)
                 if not img_bytes:
                     continue
                 nparr = np.frombuffer(img_bytes, np.uint8)
                 img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                self.capture_count += 1
+                self.capture_seconds += time.perf_counter() - t0
                 if img is not None and 5 < img.mean() < 250:
                     return img
                 if attempt < retries - 1:
@@ -117,20 +124,56 @@ class ADBController:
                 self.last_capture_error = str(e)
         return None
 
+    def _sh(self, cmd, timeout=SHELL_TIMEOUT):
+        """Every ADB shell call goes through a timeout: a wedged ADB socket used to
+        block a plain shell() forever, freezing the whole bot with no error to catch."""
+        return self.device.shell(cmd, timeout=timeout)
+
     def tap(self, x, y):
         if not self.device:
             return
-        self.device.shell(f"input tap {int(x)} {int(y)}")
+        self._sh(f"input tap {int(x)} {int(y)}")
 
     def swipe(self, x1, y1, x2, y2, duration=300):
         if not self.device:
             return
-        self.device.shell(f"input swipe {int(x1)} {int(y1)} {int(x2)} {int(y2)} {int(duration)}")
+        self._sh(f"input swipe {int(x1)} {int(y1)} {int(x2)} {int(y2)} {int(duration)}")
 
     def hold(self, x, y, duration_ms=4000):
         if not self.device:
             return
-        self.device.shell(f"input swipe {int(x)} {int(y)} {int(x)} {int(y)} {int(duration_ms)}")
+        self._sh(f"input swipe {int(x)} {int(y)} {int(x)} {int(y)} {int(duration_ms)}",
+                 timeout=SHELL_TIMEOUT + duration_ms / 1000)
+
+    def focused_package(self):
+        """Package of the window that has focus (e.g. com.android.vending when the
+        Play Store is in front), or None."""
+        if not self.device:
+            return None
+        try:
+            out = self._sh("dumpsys window windows | grep -E 'mCurrentFocus'")
+            for token in out.replace("}", " ").split():
+                if "/" in token and "." in token:
+                    return token.split("/")[0]
+        except Exception as e:
+            print(f"[ADB] focused_package failed: {e}")
+        return None
+
+    def package_version(self, package):
+        if not self.device:
+            return None
+        try:
+            out = self._sh(f"dumpsys package {package} | grep versionName")
+            for line in out.splitlines():
+                if "versionName=" in line:
+                    return line.split("versionName=", 1)[1].strip()
+        except Exception as e:
+            print(f"[ADB] package_version failed: {e}")
+        return None
+
+    def force_stop(self, package):
+        if self.device:
+            self._sh(f"am force-stop {package}")
 
     def quick_screen_check(self):
         """Single screencap — no reconnect side-effects. Returns True if screen is readable."""
@@ -149,14 +192,14 @@ class ADBController:
     def keyevent(self, key):
         if not self.device:
             return
-        self.device.shell(f"input keyevent {key}")
+        self._sh(f"input keyevent {key}")
 
     def _resolve_launch_component(self, package: str):
         """Ask the device for '<package>/<launcher-activity>'. Not all emulator
         Android images ship 'monkey' (LDPlayer's doesn't), so we can't rely on
         it to launch by package name alone — resolve the real component instead."""
         try:
-            out = self.device.shell(f"cmd package resolve-activity --brief {package}")
+            out = self._sh(f"cmd package resolve-activity --brief {package}")
             for line in out.strip().splitlines():
                 line = line.strip()
                 if line.startswith(f"{package}/"):
@@ -169,15 +212,15 @@ class ADBController:
         if not self.device:
             return
         print(f"[ADB] Stopping game: {package}")
-        self.device.shell(f"am force-stop {package}")
+        self._sh(f"am force-stop {package}")
         time.sleep(2)
         component = self._resolve_launch_component(package)
         if component:
             print(f"[ADB] Launching game: {component}")
-            self.device.shell(f"am start -n {component}")
+            self._sh(f"am start -n {component}")
         else:
             print(f"[ADB] Could not resolve launcher activity, falling back to monkey: {package}")
-            self.device.shell(f"monkey -p {package} -c android.intent.category.LAUNCHER 1")
+            self._sh(f"monkey -p {package} -c android.intent.category.LAUNCHER 1")
         time.sleep(wait)
 
 
