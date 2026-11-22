@@ -130,6 +130,19 @@ If you're running it from somewhere else (a shortcut, a scheduled task, a differ
 python "C:\Users\you\Documents\RR2-Farm-Bot\src\bot.py" --port 5554 --gold 100000
 ```
 
+### Running unattended (24h+) — recommended
+
+Start the bot through the supervisor instead. It passes every argument through to `bot.py`, restarts the bot (and with it LDPlayer) if it crashes or stops responding for 5 minutes, and keeps a log of every restart:
+```
+python supervisor.py --trophy-filter 600 --gold 1000000
+```
+(With [uv](https://docs.astral.sh/uv/): `uv sync` once, then `uv run python supervisor.py ...`.)
+
+Everything the bot does is recorded under `logs/`: `bot_*.log` (timestamped console output), `matches.csv` (one row per match), `events.csv` (every popup handled, recovery and game restart, with the reason) and `supervisor.log`. Summarise a run with:
+```
+python tools\report.py --hours 24
+```
+
 ### Parameters
 
 | Parameter | Default | Description |
@@ -160,6 +173,8 @@ Stop the bot any time with **Ctrl+C**. If it stops for any reason (crash, manual
 ## How it works (short version)
 
 The bot is a state machine: `HOME → TROPHY_MENU → FILTERED_RANKS → ATTACK_PREP → GAME_LOAD → IN_GAME → CHAMBER_OF_FORTUNE → HOME`, looping forever. Each state has its own handler that looks for a specific "anchor" button (e.g. the forge icon means HOME, the archer button means a match has started) and acts accordingly.
+
+Before any handler runs, every loop also checks for full-screen interrupts that can appear on top of any state: the **Break Time** popup (waits 15 minutes, then "Try again!"), the **forced game update** popup (updates through the Play Store and relaunches), the post-update **asset download** (waits instead of restarting), and a stray **Shop** (closed immediately, since it has gem-spending buttons). Mid-match, a dead hero's Resurrect/Retreat screen is answered with **Retreat** — never a gem resurrect. Buttons are searched only inside their known screen region, which makes each check ~5-10 ms instead of ~330 ms.
 
 If a handler's expected anchor goes missing for too long, the bot doesn't just keep guessing — it scans every state's anchor template to figure out what screen it's actually looking at and resyncs, rather than continuing to tap coordinates meant for a screen that isn't there anymore. If that still doesn't resolve things, it falls back to restarting the game, and if even the emulator itself seems hung, it restarts LDPlayer.
 
@@ -246,6 +261,10 @@ For anything not covered above — an unfamiliar error, a stack trace, the bot d
 | `src/controller.py` | ADB connection, screenshots, taps/swipes. |
 | `src/vision.py` | Template matching and OCR. |
 | `src/player_db.py` | Tracks which opponents are currently active or permanently unattackable. |
+| `supervisor.py` | Runs the bot unattended and restarts it if it crashes or hangs. |
+| `tools/report.py` | Summary of a run from the files in `logs/`. |
+| `tools/check_regions.py` | Offline check that every template is still found inside its search region (run after a game update). |
+| `logs/` | Run logs, `matches.csv`, `events.csv`, heartbeat. Not committed to git. |
 | `En_Templates/` | Reference button images used for template matching. |
 | `recrop.py` | Recapture a template from a live emulator screenshot. |
 | `get_coords.py` | Click on a live screenshot to get its pixel coordinates. |

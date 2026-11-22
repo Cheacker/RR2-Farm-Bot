@@ -142,7 +142,8 @@ Tanınmayan kareler tekilleştirilip `unknown/`'a kaydedilir; ben etiketleyip im
 
 ## 4. Fazlar
 
-### Faz 0 — Sağlamlık ve ölçüm (HEAD üzerine)
+### Faz 0 — Sağlamlık ve ölçüm (HEAD üzerine) — kod tamam (2026-11-22), 24 saatlik koşu bekliyor
+Ayrıntı: `CHANGELOG.md` 0.2.0 ve `PROJE_DEVIR.md`.
 - Şablon aramalarını bölgeyle sınırla (OCR'a geçmeden).
 - Yeni ekranlar: zorunlu güncelleme (Play Store akışı dahil), oyun içi indirme beklemesi, açılış popup zinciri,
   JOIN LEAGUE, RETREAT (kahraman öldü), Shop'tan çıkış, Break Time (~15 dk bekle, tekrar dene).
@@ -171,7 +172,8 @@ Tanınmayan kareler tekilleştirilip `unknown/`'a kaydedilir; ben etiketleyip im
 ## 5. Hazine modu
 
 ### 5.1 Bilinenler (kullanıcıdan)
-- Hazineler binalar yıkılınca **yola, binanın önüne** düşüyor; ne zaman düşeceği belli değil, **hareket etmiyorlar**.
+- Hazineler binalar yıkılınca **yola, binanın önüne** düşüyor; ne zaman düşeceği belli değil. Yer
+  değiştirmiyorlar ama **olduğu yerde dönüyorlar (3D modeller)**: görünüşleri kareden kareye değişir.
 - **Kral üzerinden geçince** toplanıyor (dokunmak gerekmiyor).
 - Düşen türler: **elmas, tokenler (~7 çeşit), inciler, mamalar, rünler (4 çeşit)**. Değerli olan genelde elmas, ama
   kullanıcı hangi türleri toplayacağını **kendisi seçebilmeli** → ~14 sınıflı bir tespit problemi.
@@ -190,9 +192,13 @@ kral çoğunu zaten toplar. Seçicilik ancak sapma/bekleme gerektiğinde devreye
    Favori üsler sabit olduğundan rota üs başına bir kez çıkarılıp saklanabilir.
 2. **Maç içinde yol takibi:** kamera kralı ortalıyor. Kralın çevresinde yol rengi bölütlenir, rotadaki bir sonraki
    noktaya doğru yoldaki bir noktaya dokunulur ya da basılı tutulur. Kral takılırsa (kare farkı ~0) alternatif nokta denenir.
-3. **Hazine tespiti:** önce tür başına şablon + renk filtresi (nesneler hareketsiz ve kamera yakınlığı sabit,
-   bu çoğu durumda yeter); yetmezse küçük bir YOLO-nano modeli (CPU'da ~10-30 ms). Veri, normal koşularda
-   maç içi kayıtlardan gelir.
+3. **Hazine tespiti:** nesneler döndüğü için tek bir şablon yetmez. İki ipucu birlikte kullanılır:
+   - *Nerede:* yerinde dönen nesne, ardışık karelerde **sabit bir noktada sürekli değişen küçük bir bölge**
+     üretir. Kamera kralı takip ettiği için önce kareler hizalanır (kral merkezli kaydırma), sonra bu
+     "yerinde dönen" lekeler bulunur. Renk filtresi (elmas pembesi, token/rün renkleri) adayları daraltır.
+   - *Ne:* aday bölge, her türün birkaç dönme açısından alınmış örnekleriyle karşılaştırılır (tür başına
+     8-12 kırpıntı) ya da küçük bir sınıflandırıcıya verilir. ~14 sınıfta şablon seti yetmezse YOLO-nano
+     (CPU'da ~10-30 ms) eğitilir. Veri, normal koşularda maç içi kayıtlardan gelir.
 4. **Seçici politika:** kullanıcının seçtiği tür + rotadan sapma mesafesi + kalan süre → sap, üstünden geç, rotaya dön.
    Seçilmeyen türler için sapma yapılmaz (yol üstündeyse zaten toplanır).
 5. **Akış farkı:** HOME → favoriler → üs seç → saldır. Birlik/büyü çağrıları tuşla. Maç sonu aynı.
@@ -200,5 +206,5 @@ kral çoğunu zaten toplar. Seçicilik ancak sapma/bekleme gerektiğinde devreye
 
 ### 5.3 Katalog nasıl çıkarılacak
 Birkaç hazine maçı `screenrecord` ile kaydedilir (45 fps). Kareleri tek tek incelemek yerine kod, ardışık kareler
-arasında yeni beliren ve sonra yerinde duran nesneleri (hazineler hareketsiz) bulur; yalnızca o anların karelerini
-ve kırpıntılarını inceleyip türlere ayırırım. Her tür için örnek kırpıntılar `En_Templates/treasure_*` olur.
+arasında yeni beliren ve yerinde dönen nesneleri bulur; yalnızca o anların karelerini ve kırpıntılarını inceleyip
+türlere ayırırım. Her tür için farklı dönme açılarından örnekler `En_Templates/treasure_*` olur.
