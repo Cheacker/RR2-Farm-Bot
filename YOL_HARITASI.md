@@ -143,7 +143,7 @@ Tanınmayan kareler tekilleştirilip `unknown/`'a kaydedilir; ben etiketleyip im
 ## 4. Fazlar
 
 ### Faz 0 — Sağlamlık ve ölçüm (HEAD üzerine) — kod tamam (2026-11-22), 24 saatlik koşu bekliyor
-Ayrıntı: `CHANGELOG.md` 0.2.0 ve `PROJE_DEVIR.md`.
+Ayrıntı: `CHANGELOG.md` 0.2.0 ve `HANDOFF.md`.
 - Şablon aramalarını bölgeyle sınırla (OCR'a geçmeden).
 - Yeni ekranlar: zorunlu güncelleme (Play Store akışı dahil), oyun içi indirme beklemesi, açılış popup zinciri,
   JOIN LEAGUE, RETREAT (kahraman öldü), Shop'tan çıkış, Break Time (~15 dk bekle, tekrar dene).
