@@ -95,10 +95,17 @@ BREAK_WAIT        = 15 * 60  # first wait after the popup appears
 BREAK_RETRY_WAIT  = 5 * 60   # extra wait if the popup is still there after "Try again!"
 UPDATE_TIMEOUT    = 10 * 60  # max wait for the Play Store to install a forced update
 INTERRUPT_CHECK_EVERY_IN_GAME = 3  # seconds; full-screen popups are rare mid-match
+# "Not enough Food?" (attacking costs food; 36 per match with the farming gear set 3).
+# Farms empty and the Shop purchase didn't help either → wait for the farms to refill.
+FOOD_WAIT         = 20 * 60
+FOOD_SHOP_RETRY   = 30 * 60  # min time between two Shop purchase attempts
+# "I am the KING!": the account was opened on another device (the user's phone).
+# Claiming kicks that device, so give the user this long before taking it back.
+KING_WAIT         = 15 * 60
 
 # Templates bot.py references that may legitimately be missing (no screenshot of
 # that screen yet). Reported once at startup instead of failing silently.
-OPTIONAL_TEMPLATES = ["btn_king_claim", "btn_archer_boosted", "btn_attack_start_gray"]
+OPTIONAL_TEMPLATES = ["btn_archer_boosted", "btn_attack_start_gray"]
 GREEN_BACK_COORDS  = (1430, 85)    # back out of attack prep / loading screen
 SCROLL_CONFIRM_COORDS = (896, 785) # ranked-list confirm after scroll — on the
                                    # attack-prep screen this is "New Opponent",
@@ -195,6 +202,7 @@ class RR2Bot:
         self._scroll_attempts    = 0
         self._last_interrupt_check = 0
         self._last_break_end     = 0
+        self._last_food_shop     = 0
         self._match_outcome      = None  # "continue" / "retreat" / ... written to matches.csv
         self._hour_capture_count = 0
         self._hour_capture_secs  = 0.0
@@ -455,6 +463,9 @@ class RR2Bot:
             self._anchor_miss_streak = 0
             self._sleep(5)
             return True
+        if self.vision.find_template(screen, "title_not_enough_food", threshold=0.85):
+            self._handle_no_food(screen)
+            return True
         if self.vision.find_template(screen, "title_shop", threshold=0.85):
             # Stray Shop (e.g. a mis-tap on HOME). Several of its buttons spend gems, so
             # close it right away instead of letting a handler tap its own coordinates here.
@@ -479,6 +490,56 @@ class RR2Bot:
         self._trophy_miss_count = 0
         self._anchor_miss_streak = 0
         self.state = State.HOME
+
+    def _handle_no_food(self, screen):
+        """'Not enough Food?' after pressing ATTACK. In order of preference:
+        1. 'Collect Food from Farms!' → COLLECT (free),
+        2. farms empty (WATCH VIDEO / gems offer) → buy food in the Shop with tokens,
+        3. that failed recently too → close and wait for the farms to refill.
+        Never taps the gem/video offer itself."""
+        collect = self.vision.find_template(screen, "btn_big_collect", threshold=0.85)
+        if collect:
+            self._event("food_collected", "Not enough Food → COLLECT from farms")
+            self.adb.tap(*collect)
+            self._sleep(3)
+        elif (self.vision.find_template(screen, "btn_video", threshold=0.90)
+                and time.time() - self._last_food_shop > FOOD_SHOP_RETRY):
+            self._last_food_shop = time.time()
+            self._event("food_shop", "farms empty → buying food in the Shop")
+            self._buy_food_in_shop()
+        else:
+            self._event("food_empty", f"no food anywhere → waiting {FOOD_WAIT // 60} min")
+            self.adb.tap(*POPUP_CLOSE_COORDS)
+            self._sleep(FOOD_WAIT)
+        # Where we land afterwards isn't fixed (attack prep, HOME...): resync.
+        f = self.adb.current_screen()
+        self.state = (self._find_state(f) if f is not None else None) or State.HOME
+        self._trophy_miss_count = 0
+        self._anchor_miss_streak = 0
+        self._game_load_miss = 0
+        if self.state == State.ATTACK_PREP:
+            self._attack_prep_start = time.time()
+
+    def _buy_food_in_shop(self):
+        """From the food popup's gem/video variant: close it, open the Shop, tap the
+        food offer (paid with tokens), close the Shop. Kept from the original bot."""
+        self.adb.tap(*VIDEO_CLOSE_COORDS)
+        time.sleep(1)
+        self.adb.tap(*SHOP_COORDS)
+        self._sleep(7)
+        f = self.adb.current_screen()
+        food_btn = self.vision.find_template(f, "btn_food", threshold=0.90) if f is not None else None
+        if food_btn:
+            print("[FOOD] Food offer found in the Shop, buying...")
+            self.adb.tap(*food_btn)
+            time.sleep(1)
+        else:
+            self._event("food_shop_failed", "food offer not found in the Shop")
+            self._save_debug_screen("food_offer_not_found")
+        f = self.adb.current_screen()
+        close_btn = self.vision.find_template(f, "btn_close", threshold=0.70) if f is not None else None
+        self.adb.tap(*close_btn) if close_btn else self.adb.tap(*VIDEO_CLOSE_COORDS)
+        time.sleep(1)
 
     def _handle_forced_update(self):
         """'A brand new update' popup blocks the game entirely until updated."""
@@ -641,11 +702,15 @@ class RR2Bot:
             return None
 
         # Break Time is handled by _check_interrupts on every loop, before any handler.
-        # "I am the King" has no captured template yet (btn_king_claim is optional);
-        # once captured this branch claims it.
+        # "I am the KING!" (after a game start, when the account was used elsewhere).
         king = self.vision.find_template(screen, "btn_king_claim", threshold=0.85, region=FULL)
         if king:
-            self._event("king_claim", "claimed")
+            self._event("king_claim", f"account in use elsewhere → waiting {KING_WAIT // 60} min, then claiming")
+            self._sleep(KING_WAIT)
+            f = self.adb.current_screen()
+            king = self.vision.find_template(f, "btn_king_claim", threshold=0.85) if f is not None else None
+            if not king:
+                return None
             self.adb.tap(king[0], king[1])
             time.sleep(RESTART_GAME_WAIT)
             return State.HOME
@@ -1034,43 +1099,7 @@ class RR2Bot:
     def handle_game_load(self, screen):
         time.sleep(0.1)
         self.adb.tap(*SECOND_TROOP_SLOT_COORDS)
-        video_btn = self.vision.find_template(screen, "btn_video", threshold=0.90)
-        if video_btn:
-            print("[GAME_LOAD] Video/food offer detected → buying food...")
-            self.adb.tap(*VIDEO_CLOSE_COORDS)
-            time.sleep(1)
-            self.adb.tap(*SHOP_COORDS)
-            time.sleep(7)
-            f = self.adb.current_screen()
-            if f is not None:
-                food_btn = self.vision.find_template(f, "btn_food", threshold=0.90)
-                if food_btn:
-                    print("[GAME_LOAD] Food found, buying...")
-                    self.adb.tap(food_btn[0], food_btn[1])
-                    time.sleep(1)
-                else:
-                    print("[GAME_LOAD] Food button not found in shop.")
-            # Prefer a template-matched close over the fixed coordinate — VIDEO_CLOSE_COORDS
-            # is reused here on the assumption the shop's X sits in the same spot as the
-            # video popup's, which isn't guaranteed on every emulator/resolution.
-            f = self.adb.current_screen()
-            close_btn = self.vision.find_template(f, "btn_close", threshold=0.70) if f is not None else None
-            self.adb.tap(*close_btn) if close_btn else self.adb.tap(*VIDEO_CLOSE_COORDS)
-            time.sleep(1)
-            # Verify we actually left the shop/popup before declaring HOME — forcing the
-            # state blindly here is what left the bot stuck showing the shop on screen
-            # while HOME kept looking for icon_forge and never finding it.
-            f = self.adb.current_screen()
-            still_stuck = f is not None and (
-                self.vision.find_template(f, "btn_video", threshold=0.90)
-                or self.vision.find_template(f, "btn_food", threshold=0.90)
-            )
-            if not still_stuck:
-                self.state = State.HOME
-                return
-            print("[GAME_LOAD] Shop/video popup still visible after close attempt — retrying via miss counter.")
-            # Fall through to the miss counter below instead of returning — the existing
-            # 15-miss restart-game safety net will recover if this keeps failing.
+        # "Not enough Food?" is handled by _check_interrupts → _handle_no_food.
         go_back = self.vision.find_template(screen, "btn_take_me_back", threshold=0.9)
         if go_back:
             self._game_load_miss = 0

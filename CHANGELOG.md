@@ -29,6 +29,12 @@ Uzun, gözetimsiz çalışma için sağlamlık sürümü (Yol Haritası Faz 0).
   oyunu yeniden başlatıyordu. Düzeltildi (yanındaki 15 elmaslık TRY AGAIN'e asla basılmaz).
 - **Supervisor:** heartbeat dosyası tam yazılırken okunamadığında botu gereksiz yere öldürüyordu; artık tek seferlik
   okuma hatası yok sayılıyor. `tools/report.py` Türkçe Windows konsolunda çöküyordu, düzeltildi.
+- **Out of food no longer stalls the bot:** on "Not enough Food?" it now collects food from the farms. When the
+  farms are empty it buys food in the Shop with tokens, and if that fails it waits 20 minutes for the farms to
+  refill. It never pays with gems or watches the video. (On 2026-11-23 the bot restarted the game every 1.5 minutes
+  for 5 hours on this screen.)
+- **"I am the KING!":** when the account is opened on another device, the bot waits 15 minutes and only then takes
+  the game back, so a quick check on your phone isn't interrupted.
 - **Hata düzeltmeleri:** LDPlayer yeniden başlatma süresinin hiç sıfırlanmaması (yazım hatası), bağlantı kopma
   mesajındaki sıfıra bölme.
 - **Kurulum:** `uv` ile (`pyproject.toml`); `requirements.txt` eski yöntem için duruyor.

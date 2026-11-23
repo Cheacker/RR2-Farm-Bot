@@ -14,6 +14,7 @@ NAME_REGION = (-705, -20, 525, 40)
 SILENT_ON_MISS = {
     "btn_continue", "btn_melt", "btn_retreat",
     "popup_break_time", "popup_update", "title_shop", "text_downloading",
+    "title_not_enough_food",
 }
 
 # Pass region=FULL to force a whole-screen search (e.g. the _find_state fallback).
@@ -57,6 +58,11 @@ DEFAULT_REGIONS = {
     "btn_retreat":           (920, 640, 1340, 860),
     "title_shop":            (0, 0, 260, 190),
     "text_downloading":      (480, 520, 900, 700),
+    # "Not enough Food?" popup (2026-11-23): title top-left, farm COLLECT at (998, 635)
+    "title_not_enough_food": (0, 0, 700, 170),
+    "btn_big_collect":       (700, 480, 1300, 780),
+    # "I am the KING!" (account opened on another device), button at (810, 484)
+    "btn_king_claim":        (560, 380, 1060, 590),
     # btn_play_update lives in the Play Store, whose layout we don't control: full screen.
 }
 

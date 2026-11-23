@@ -44,6 +44,8 @@ Ana döngü (`RR2Bot.loop`), her turda:
 | Kahraman öldü | `btn_retreat` | IN_GAME'de RETREAT. Asla RESURRECT (36 elmas) |
 | Açılış teklifleri | `btn_close` | HOME kaçırmalarında X |
 | Lig sonucu | `btn_collect_league` | HOME'da her kaçırmada |
+| Not enough Food? | `title_not_enough_food` | Farm COLLECT (`btn_big_collect`) → else (WATCH VIDEO variant, farms empty) Shop food purchase with tokens (`btn_video` → `SHOP_COORDS` → `btn_food`, at most every 30 min; **unverified live**) → else X and wait 20 min. Then `_find_state` resync |
+| I am the KING! | `btn_king_claim` | Account opened on another device (user's phone). In `_find_state`: wait 15 min (`KING_WAIT`), claim only if still shown |
 | Oyun ön planda değil | `focused_package()` | HOME'da 10 kaçırmada bir; Play Store ise güncelleme akışı, değilse oyunu yeniden başlat |
 
 ## 4. Kayıtlar
@@ -51,7 +53,7 @@ Ana döngü (`RR2Bot.loop`), her turda:
 - `logs/bot_*.log`: konsolun zaman damgalı kopyası (`_TeeLog`), son 30 dosya tutulur.
 - `logs/events.csv`: `time, kind, state, match, detail`. Türler: `bot_start, game_restart, ldplayer_restart,
   break_time, forced_update, update_installed, update_failed, shop_closed, hero_died, play_store_in_front,
-  king_claim, startup_failed`. Her `_restart_game(reason)` bir satır yazar.
+  king_claim, startup_failed, opponent_unattackable, food_collected, food_shop, food_shop_failed, food_empty`. Her `_restart_game(reason)` bir satır yazar.
 - `logs/matches.csv`: `time, match, loop_s, outcome, gold, pearls, trophy_filter`. `outcome`: `finished` /
   `hero_died` / `unknown`.
 - `session_log.txt`: her koşuda sıfırlanan saatlik özet (maç, ortalama döngü, inci, screencap ms, olay sayısı).
@@ -84,7 +86,10 @@ Ana döngü (`RR2Bot.loop`), her turda:
 ## 6. Açık işler
 
 - Faz 0 çıktısı: 24 saatlik gözetimli koşu + `tools/report.py` raporu.
-- `btn_king_claim`, `btn_archer_boosted` şablonları yakalanmadı (ekran görüntüsü yok).
+- `btn_archer_boosted` template not captured yet.
+- Food Shop purchase (`_buy_food_in_shop`, legacy flow) not verified on 12.9.0: where `SHOP_COORDS` (1540,508)
+  lands and whether `btn_food` still matches. On the first `food_shop`/`food_shop_failed` event, check fail_debug.
+- Food cost depends on gear set 3 (farming set, 36 food/match on 2026-11-23); the bot taps set 3 before ATTACK.
 - `btn_sell` konumu: ilk görüldüğünde (fail_debug) bölge ekle.
 - Maç sonu altın OCR'ı tutarsız olabilir (ardışık maçlarda 1.09M → 0.96M → 2.31M); incele.
 - Faz 1-4: `YOL_HARITASI.md`.
