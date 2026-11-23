@@ -10,7 +10,7 @@ Uzun, gözetimsiz çalışma için sağlamlık sürümü (Yol Haritası Faz 0).
 - **Daha hızlı ekran tanıma:** butonlar tüm ekran yerine kendi bölgelerinde aranıyor (~330 ms → ~5-10 ms).
   "ATTACK!" butonu önce şablonla, gerekirse OCR ile bulunuyor.
 - **Yeni tanınan ekranlar:**
-  - *Break Time* ("You've been playing for a while"): 15 dk beklenip tekrar deneniyor (eskiden takılıp kalıyordu).
+  - *Break Time* ("You've been playing for a while"): beklenip tekrar deneniyor (eskiden takılıp kalıyordu).
   - *Zorunlu oyun güncellemesi*: Play Store üzerinden otomatik güncelleniyor, oyun yeniden açılıyor.
   - *Güncelleme sonrası indirme* ("Downloading…"): beklenmeli; artık oyun yeniden başlatılmıyor.
   - *Kahraman öldü* (Resurrect/Retreat): RETREAT'e basılıyor (asla elmasla diriltmiyor); eskiden 3 dakika
@@ -33,8 +33,9 @@ Uzun, gözetimsiz çalışma için sağlamlık sürümü (Yol Haritası Faz 0).
   farms are empty it buys food in the Shop with tokens, and if that fails it waits 20 minutes for the farms to
   refill. It never pays with gems or watches the video. (On 2026-11-23 the bot restarted the game every 1.5 minutes
   for 5 hours on this screen.)
-- **"I am the KING!":** when the account is opened on another device, the bot waits 15 minutes and only then takes
-  the game back, so a quick check on your phone isn't interrupted.
+- **"I am the KING!"** (appears after ~2 minutes idle, e.g. after a long wait) is now claimed right away.
+- **Break Time ends sooner:** instead of a fixed 15 minutes (+5 if still on break), the bot waits 12 minutes and
+  then presses "Try again!" every 30 seconds, so it continues within half a minute of the break ending.
 - **Hata düzeltmeleri:** LDPlayer yeniden başlatma süresinin hiç sıfırlanmaması (yazım hatası), bağlantı kopma
   mesajındaki sıfıra bölme.
 - **Kurulum:** `uv` ile (`pyproject.toml`); `requirements.txt` eski yöntem için duruyor.

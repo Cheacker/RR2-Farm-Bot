@@ -18,7 +18,7 @@ Ana döngü (`RR2Bot.loop`), her turda:
 1. `_heartbeat()` (2 sn'de bir dosyaya yazar)
 2. `current_screen()` (deneme başına 8 sn zaman aşımı); `None` ise `_handle_no_screen()`: son geçerli kareden beri
    90 sn → ADB yeniden bağlan + oyunu yeniden başlat, 5 dk → LDPlayer'ı yeniden başlat (koşulsuz)
-3. `_check_interrupts()`: Break Time, zorunlu güncelleme, "Downloading", Shop. IN_GAME'de yalnızca 3 sn'de bir.
+3. `_check_interrupts()`: Break Time, forced update, "Downloading", I am the KING, Not enough Food, Shop (each ~5-6 ms, region-limited). IN_GAME'de yalnızca 3 sn'de bir.
 4. Durum işleyicisi: HOME → TROPHY_MENU → FILTERED_RANKS → ATTACK_PREP → GAME_LOAD → IN_GAME → CHAMBER_OF_FORTUNE
 5. 10 ardışık kaçırmada `_find_state()` (tam ekran tarama) ile yeniden senkron
 
@@ -37,7 +37,7 @@ Ana döngü (`RR2Bot.loop`), her turda:
 
 | Ekran | Şablon | Davranış |
 |---|---|---|
-| Break Time | `popup_break_time` | 15 dk bekle (`_sleep`, heartbeat canlı), "Try again!" (810,505). 2 dk içinde tekrar çıkarsa 5 dk. |
+| Break Time | `popup_break_time` | Length varies (14-16 min). Wait 12 min (`_sleep`, heartbeat alive), then "Try again!" (810,505) every 30 s until the popup is gone (max 40 min). Pressing early is harmless (user). |
 | Zorunlu güncelleme | `popup_update` | "Download now!" → Play Store'da `btn_play_update` → sürüm değişene kadar (≤10 dk) bekle → Play Store'u kapat → oyunu aç |
 | Asset indirme | `text_downloading` | 5 sn bekle, HOME kaçırma sayaçlarını sıfırla |
 | Shop | `title_shop` | X (1520,88). Durum HOME'a çekilir (IN_GAME hariç) |
@@ -45,7 +45,7 @@ Ana döngü (`RR2Bot.loop`), her turda:
 | Açılış teklifleri | `btn_close` | HOME kaçırmalarında X |
 | Lig sonucu | `btn_collect_league` | HOME'da her kaçırmada |
 | Not enough Food? | `title_not_enough_food` | Farm COLLECT (`btn_big_collect`) → else (WATCH VIDEO variant, farms empty) Shop food purchase with tokens (`btn_video` → `SHOP_COORDS` → `btn_food`, at most every 30 min; **unverified live**) → else X and wait 20 min. Then `_find_state` resync |
-| I am the KING! | `btn_king_claim` | Account opened on another device (user's phone). In `_find_state`: wait 15 min (`KING_WAIT`), claim only if still shown |
+| I am the KING! | `btn_king_claim` | Shown after ~2 min of idling (not when another device logs in — user, 2026-11-23). Interrupt: claim at once |
 | Oyun ön planda değil | `focused_package()` | HOME'da 10 kaçırmada bir; Play Store ise güncelleme akışı, değilse oyunu yeniden başlat |
 
 ## 4. Kayıtlar
@@ -82,6 +82,9 @@ Ana döngü (`RR2Bot.loop`), her turda:
 - **ADB maliyetleri:** `screencap -p` ~1.2 sn, `input tap` ~234 ms. Hızlandırma Faz 2 (scrcpy).
 - **Supervisor heartbeat okuması** bot dosyayı değiştirirken anlık başarısız olabilir; tek hata öldürme sebebi değil.
 - `_connect()` 127.0.0.1:5555 bağlanmadan `emulator-5554`'e düşebilir; aynı LDPlayer örneği, sorun değil.
+
+- **Food prediction not worth it:** the food popup check costs ~6 ms per loop; OCR of the HOME food counter costs
+  ~208 ms. Predicting from the counter would cost more than reacting to the popup, which spends nothing.
 
 ## 6. Açık işler
 

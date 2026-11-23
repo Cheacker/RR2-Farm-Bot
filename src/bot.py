@@ -91,17 +91,17 @@ UPDATE_DOWNLOAD_COORDS = (810, 522)  # "Download now!" on the forced-update popu
 PLAY_STORE_PACKAGE = "com.android.vending"
 
 # Break Time: the game stops you after ~5h of play for ~15 min (user's observation).
-BREAK_WAIT        = 15 * 60  # first wait after the popup appears
-BREAK_RETRY_WAIT  = 5 * 60   # extra wait if the popup is still there after "Try again!"
+# The exact length varies (14-16 min), so wait most of it, then press "Try again!"
+# every BREAK_POLL s until the popup is gone (pressing early is harmless).
+BREAK_MIN_WAIT    = 12 * 60
+BREAK_POLL        = 30
+BREAK_MAX_WAIT    = 40 * 60  # give up polling; the next loop sees the popup again
 UPDATE_TIMEOUT    = 10 * 60  # max wait for the Play Store to install a forced update
 INTERRUPT_CHECK_EVERY_IN_GAME = 3  # seconds; full-screen popups are rare mid-match
 # "Not enough Food?" (attacking costs food; 36 per match with the farming gear set 3).
 # Farms empty and the Shop purchase didn't help either → wait for the farms to refill.
 FOOD_WAIT         = 20 * 60
 FOOD_SHOP_RETRY   = 30 * 60  # min time between two Shop purchase attempts
-# "I am the KING!": the account was opened on another device (the user's phone).
-# Claiming kicks that device, so give the user this long before taking it back.
-KING_WAIT         = 15 * 60
 
 # Templates bot.py references that may legitimately be missing (no screenshot of
 # that screen yet). Reported once at startup instead of failing silently.
@@ -201,7 +201,6 @@ class RR2Bot:
         self._scroll_no_progress = 0
         self._scroll_attempts    = 0
         self._last_interrupt_check = 0
-        self._last_break_end     = 0
         self._last_food_shop     = 0
         self._match_outcome      = None  # "continue" / "retreat" / ... written to matches.csv
         self._hour_capture_count = 0
@@ -463,6 +462,17 @@ class RR2Bot:
             self._anchor_miss_streak = 0
             self._sleep(5)
             return True
+        king = self.vision.find_template(screen, "btn_king_claim", threshold=0.85)
+        if king:
+            # "I am the KING!" appears after ~2 min idle (user's observation) — e.g. after
+            # a long wait. Claiming is harmless: tap at once.
+            self._event("king_claim", f"claimed in {self.state}")
+            self.adb.tap(*king)
+            self._sleep(RESTART_GAME_WAIT)
+            self.state = State.HOME
+            self._trophy_miss_count = 0
+            self._anchor_miss_streak = 0
+            return True
         if self.vision.find_template(screen, "title_not_enough_food", threshold=0.85):
             self._handle_no_food(screen)
             return True
@@ -478,14 +488,19 @@ class RR2Bot:
         return False
 
     def _handle_break_time(self):
-        """'You've been playing for a while' — wait it out, then 'Try again!'. A popup
-        that is still there right after a retry only gets the shorter extra wait."""
-        retry = time.time() - self._last_break_end < 120
-        wait = BREAK_RETRY_WAIT if retry else BREAK_WAIT
-        self._event("break_time", f"{'still on break, ' if retry else ''}waiting {wait // 60} min")
-        self._sleep(wait)
-        self.adb.tap(*TRY_AGAIN_COORDS)
-        self._last_break_end = time.time()
+        """'You've been playing for a while': wait most of the break, then press
+        'Try again!' every BREAK_POLL s until the popup disappears."""
+        start = time.time()
+        self._event("break_time", f"waiting {BREAK_MIN_WAIT // 60} min, then retrying every {BREAK_POLL}s")
+        self._sleep(BREAK_MIN_WAIT)
+        while time.time() - start < BREAK_MAX_WAIT:
+            self.adb.tap(*TRY_AGAIN_COORDS)
+            self._sleep(3)
+            f = self.adb.current_screen()
+            if f is not None and not self.vision.find_template(f, "popup_break_time", threshold=0.85):
+                print(f"[BREAK] Over after {(time.time() - start) / 60:.1f} min")
+                break
+            self._sleep(BREAK_POLL)
         self._sleep(RESTART_GAME_WAIT)
         self._trophy_miss_count = 0
         self._anchor_miss_streak = 0
@@ -705,12 +720,7 @@ class RR2Bot:
         # "I am the KING!" (after a game start, when the account was used elsewhere).
         king = self.vision.find_template(screen, "btn_king_claim", threshold=0.85, region=FULL)
         if king:
-            self._event("king_claim", f"account in use elsewhere → waiting {KING_WAIT // 60} min, then claiming")
-            self._sleep(KING_WAIT)
-            f = self.adb.current_screen()
-            king = self.vision.find_template(f, "btn_king_claim", threshold=0.85) if f is not None else None
-            if not king:
-                return None
+            self._event("king_claim", "claimed")
             self.adb.tap(king[0], king[1])
             time.sleep(RESTART_GAME_WAIT)
             return State.HOME
