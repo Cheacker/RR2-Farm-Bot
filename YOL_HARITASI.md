@@ -208,3 +208,21 @@ kral çoğunu zaten toplar. Seçicilik ancak sapma/bekleme gerektiğinde devreye
 Birkaç hazine maçı `screenrecord` ile kaydedilir (45 fps). Kareleri tek tek incelemek yerine kod, ardışık kareler
 arasında yeni beliren ve yerinde dönen nesneleri bulur; yalnızca o anların karelerini ve kırpıntılarını inceleyip
 türlere ayırırım. Her tür için farklı dönme açılarından örnekler `En_Templates/treasure_*` olur.
+
+### 5.4 Exploration log (2026-11-24, set B "treasure hunter", trophies ~2150)
+
+- **Favorites path:** HOME (1535,505) → Community. Card swipes stop at varying positions, so the robust way is:
+  Leaderboard card OPEN → right arrow (1545,520) → "Favorite Players". Rows: swords button at x≈1415; inactive
+  players have gray swords. Insta-Troops page has a **SKIP 25 gems** button at (800,795): never tap there.
+- **Prep screen:** set B selected by the user; attack costs 11 food.
+- **Death screen danger:** a blind troop tap at (470,720) hit RESURRECT → "Are you sure? CONFIRM 36 gems".
+  Nothing was spent (CANCEL), but in matches use **hotkeys only** (keyevent 8 9 10 = troops 1-3, 12 13 14 = spells
+  5-7, 45/51 = Q/W) and keep any screen holds inside x 550-1050 / y 150-600.
+- **Sister Maria (1827):** king died in 15 s (mummies). User: don't attack it again, nor any base where we died.
+- **affreux 02 (1577), 3 runs** with hotkey spam plus different king inputs (hold up / steering / tap-drag-hold
+  experiment): every run ended at "SIEGE!" (time out) with **28-33 % progress, 1 crown, -11..-13 trophies**.
+  The input type made no measurable difference; the camera jumps ~200 px at a time (dead-zone camera), so camera
+  shift is not a usable king-movement signal. **Open question for the user: how is the king moved?**
+- **Treasures are reported on the result screen** under "Hidden Treasures:" with type and level (run 3: two runes,
+  "Cannon: Swift Shells", "Increased Normal Damage"). This gives a per-match ground truth for evaluation.
+- One uncollected treasure seen on the final frame of run 2: a red/pink gem at (1290,245), off the king's path.
