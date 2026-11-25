@@ -94,6 +94,15 @@ class TreasureBases:
         self.meta[bid]["ban_reason"] = reason
         self._save()
 
+    def mark_busy(self, bid, seconds=15 * 60):
+        """Owner is online ('Take me back' while loading): skip the base for a while."""
+        self.meta[bid]["busy_until"] = time.time() + seconds
+        self._save()
+
+    def available(self, bid):
+        m = self.meta.get(bid, {})
+        return not m.get("banned") and m.get("busy_until", 0) < time.time()
+
     def banned(self, bid):
         return self.meta.get(bid, {}).get("banned", False)
 

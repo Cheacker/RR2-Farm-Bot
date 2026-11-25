@@ -846,6 +846,7 @@ class RR2Bot:
             print(f"[ATTACK_PREP] {reason} — back to Favorites")
             self.adb.tap(*GREEN_BACK_COORDS)
             self._target_base = None
+            self._fav_reset()
             self.state = State.FAVORITES
             time.sleep(1)
             return
@@ -1219,6 +1220,11 @@ class RR2Bot:
     def handle_going_back(self, screen):
         if self._mode == "treasure":
             print("[GOING_BACK] Tapping green back button → FAVORITES...")
+            if self._target_base:
+                self.bases.mark_busy(self._target_base[0])   # owner online: retry in 15 min
+                self._event("treasure_base_busy", f"base {self._target_base[0]} owner online")
+            self._target_base = None
+            self._fav_reset()
             self.adb.tap(*GREEN_BACK_COORDS)
             self.state = State.FAVORITES
             time.sleep(1)
@@ -1319,9 +1325,7 @@ class RR2Bot:
             self.adb.tap(*PAGE_NEXT_COORDS)
             time.sleep(3)
             self._nav_miss = 0
-            self._fav_scrolls = 0
-            self._fav_seen = set()
-            self._fav_last_view = None
+            self._fav_reset()
             self.state = State.FAVORITES
             return
         self._nav_miss += 1
@@ -1337,6 +1341,12 @@ class RR2Bot:
         else:
             self._anchor_miss_streak += 1
             time.sleep(1)
+
+    def _fav_reset(self):
+        """The Favorites list opens scrolled to the top: restart the scan."""
+        self._fav_scrolls = 0
+        self._fav_seen = set()
+        self._fav_last_view = None
 
     def handle_favorites(self, screen):
         """Pick a favorite base: active (yellow swords), trophies ≤ --treasure-max-trophies,
@@ -1367,12 +1377,12 @@ class RR2Bot:
             self.bases.note_trophies(bid, trophies)
             rows.append((bid, trophies, x, y))
         view = tuple(r[0] for r in rows)
-        eligible = [r for r in rows if r[1] and r[1] <= self._treasure_max and not self.bases.banned(r[0])]
+        eligible = [r for r in rows if r[1] and r[1] <= self._treasure_max and self.bases.available(r[0])]
         print(f"[FAVORITES] rows: {[(b, t) for b, t, _, _ in rows]} eligible: {[b for b, *_ in eligible]}")
         pick = min(eligible, key=lambda r: self.bases.last_attack(r[0])) if eligible else None
         # a known eligible base further down the list that waited longer than the pick?
         older_elsewhere = pick and any(
-            bid not in view and bid not in self._fav_seen and not m.get("banned")
+            bid not in view and bid not in self._fav_seen and self.bases.available(bid)
             and (m.get("trophies") or 99999) <= self._treasure_max
             and m.get("last_attack", 0) < self.bases.last_attack(pick[0])
             for bid, m in self.bases.meta.items())

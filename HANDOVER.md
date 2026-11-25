@@ -96,7 +96,7 @@ Ana döngü (`RR2Bot.loop`), her turda:
 - In-match input is a real finger (`ADBController.touch()` → `TouchInput`, sendevent on the multitouch device).
   `input tap/swipe` don't steer the king. Keys via the same device; 9/0 not mapped (gem boosts).
 - `PathFollower`: icon `icon_king_progress` x on the top bar = progress. Keep heading while it grows, else nearest
-  untried heading. x ≥ 1120 = castle → finger up, spells only. Death before the castle bans the base; at the castle
+  untried heading. x ≥ 1120 = castle → finger up, spells only. Owner online ("Take me back") skips the base for 15 min. Death before the castle bans the base; at the castle
   it counts as success (user).
 - Known limit (user, 2026-11-26): the king walks along the path **edge**, so treasures dropped in the middle are
   missed (about half).
