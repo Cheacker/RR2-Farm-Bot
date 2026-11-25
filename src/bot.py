@@ -10,7 +10,7 @@ import numpy as np
 from controller import ADBController
 from vision import VisionInterpreter, FULL
 from player_db import PlayerDB
-from treasure import (TreasureBases, PathFollower, read_hidden_treasures, write_treasure_row,
+from treasure import (TreasureBases, PathFollower, FrameRecorder, read_hidden_treasures, write_treasure_row,
                       FAV_ROW_TROPHIES, FAV_ROW_NAME)
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -26,6 +26,7 @@ EVENTS_CSV     = os.path.join(LOG_DIR, "events.csv")    # restarts, popups, reco
 HEARTBEAT_PATH = os.path.join(LOG_DIR, "heartbeat.txt") # watched by supervisor.py
 TREASURES_CSV  = os.path.join(LOG_DIR, "treasures.csv") # treasure mode: one row per match
 TREASURE_SHOTS = os.path.join(LOG_DIR, "treasure_results")  # result screens (catalog material)
+TREASURE_FRAMES = os.path.join(LOG_DIR, "treasure_frames")  # every in-match frame (training data)
 HEARTBEAT_EVERY = 2  # seconds between heartbeat writes
 KEEP_RUN_LOGS   = 30 # bot_*.log files kept in logs/
 
@@ -222,6 +223,7 @@ class RR2Bot:
         self._mode               = mode
         self._treasure_max       = treasure_max_trophies
         self.bases               = TreasureBases() if mode == "treasure" else None
+        self.frames              = FrameRecorder(TREASURE_FRAMES) if mode == "treasure" else None
         self._follower           = None
         self._target_base        = None   # (base id, trophies) being attacked
         self._nav_miss           = 0
@@ -1403,6 +1405,7 @@ class RR2Bot:
             self.bases.attacked(bid)
         self._follower = PathFollower(self.adb.touch(), self.vision)
         self._follower.start()
+        self.frames.start(bid or "unknown")
         self._in_game_start = time.time()
         self._last_in_game_find_state = time.time()
         self._match_outcome = None
@@ -1439,6 +1442,7 @@ class RR2Bot:
                                                    f"{now - self._in_game_start:.0f}", " | ".join(treasures)])
             except OSError as e:
                 print(f"[TREASURE] csv write failed: {e}")
+            self.frames.finish(treasures, self._match_outcome)
             print(f"[TREASURE] base {bid}: {self._match_outcome}, treasures: {treasures or 'none'}")
             self.adb.tap(*cont)
             self._in_game_start = 0
@@ -1461,6 +1465,7 @@ class RR2Bot:
             time.sleep(1.5)
             return
         f.step(screen)
+        self.frames.save(screen, f.last_seen_x)
 
     # ── Session log helpers ───────────────────────────────────────────────────
     def _log_to_file(self, message):

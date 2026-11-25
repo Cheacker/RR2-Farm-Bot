@@ -118,6 +118,7 @@ class PathFollower:
         self.t, self.v = touch, vision
         self.heading, self.tried, self.last_x, self.n = 90, [], None, 0
         self.max_x = None
+        self.last_seen_x = None
         self.at_castle = False
 
     def _target(self, a):
@@ -152,6 +153,7 @@ class PathFollower:
         if self.n % 3 == 0:
             self.t.keys("67w")
         x = self.king_x(screen)
+        self.last_seen_x = x
         if x is not None:
             self.max_x = x if self.max_x is None else max(self.max_x, x)
         if x is not None and x >= self.END_X:
@@ -209,3 +211,54 @@ def write_treasure_row(path, row):
         if new:
             w.writerow(["time", "base", "trophies", "outcome", "king_x_max", "match_s", "treasures"])
         w.writerow(row)
+
+
+class FrameRecorder:
+    """Saves every in-match frame of treasure mode as JPEG (training data for the
+    treasure detector): logs/treasure_frames/<match>/<seconds>_<kingx>.jpg.
+    Stops saving when the folder passes MAX_BYTES so a long run can't fill the disk."""
+
+    MAX_BYTES = 8 * 1024 ** 3
+
+    def __init__(self, root):
+        self.root = root
+        self.dir = None
+        self.t0 = 0
+        self.full = False
+        self._size = None
+
+    def _used(self):
+        if self._size is None:
+            self._size = 0
+            for d, _, files in os.walk(self.root):
+                self._size += sum(os.path.getsize(os.path.join(d, f)) for f in files)
+        return self._size
+
+    def start(self, tag):
+        self.t0 = time.time()
+        self.dir = os.path.join(self.root, f"{time.strftime('%Y%m%d_%H%M%S')}_{tag}")
+        if self._used() >= self.MAX_BYTES:
+            if not self.full:
+                print(f"[TREASURE] frame folder over {self.MAX_BYTES // 1024 ** 3} GB - not saving frames")
+            self.full = True
+            self.dir = None
+            return
+        os.makedirs(self.dir, exist_ok=True)
+
+    def save(self, frame, king_x=None):
+        if self.dir is None or frame is None:
+            return
+        name = f"{time.time() - self.t0:06.1f}_{king_x if king_x is not None else 'na'}.jpg"
+        ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
+        if ok:
+            with open(os.path.join(self.dir, name), "wb") as f:
+                f.write(buf.tobytes())
+            self._size += len(buf)
+
+    def finish(self, treasures, outcome):
+        """Ground truth for the match: what the result screen said was collected."""
+        if self.dir is None:
+            return
+        with open(os.path.join(self.dir, "result.json"), "w", encoding="utf-8") as f:
+            json.dump({"outcome": outcome, "hidden_treasures": treasures}, f, indent=1)
+        self.dir = None

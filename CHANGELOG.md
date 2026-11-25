@@ -8,7 +8,11 @@ Uzun, gözetimsiz çalışma için sağlamlık sürümü (Yol Haritası Faz 0).
   `--treasure-max-trophies`, default 2000) with gear set 2. The bot walks the king along the path by itself,
   using the king icon on the top progress bar as its guide. At the castle it stops and only casts spells.
   Bases where the king died on the path are skipped from then on. Every match's Hidden Treasures are logged to
-  `logs/treasures.csv`, and the result screen is saved to `logs/treasure_results/`.
+  `logs/treasures.csv`, and the result screen is saved to `logs/treasure_results/`. Every in-match frame is saved
+  to `logs/treasure_frames/` (capped at 8 GB) as training data for treasure detection.
+- **No more 5-minute blindness after an emulator restart:** the bot could latch onto LDPlayer's short-lived
+  `emulator-5554` entry. It now waits for the real `127.0.0.1:5555` connection, and reconnects at once if the device
+  disappears.
 
 - **Kendini kurtaran bot:** yeni `supervisor.py`, bot çökerse ya da 5 dakika boyunca yanıt vermezse onu ve
   LDPlayer'ı otomatik yeniden başlatır. Tüm ADB komutlarının artık zaman sınırı var; donmuş bir bağlantı
