@@ -55,6 +55,17 @@ class ADBController:
                 self.device = self.adb.device(self._serial)
                 return
             devices = self.adb.device_list()
+            # Right after an LDPlayer (re)start only its transient 'emulator-5554' entry may be
+            # listed; it vanishes a little later and left the bot blind for 5 min (2026-11-26).
+            # Give 'adb connect' up to ~20 s to register the TCP serial before falling back.
+            candidate_serials = [f"127.0.0.1:{p}" for p in candidates]
+            for _ in range(10):
+                if any(d.serial in candidate_serials for d in devices):
+                    break
+                time.sleep(2)
+                for candidate in candidates:
+                    subprocess.run(["adb", "connect", f"127.0.0.1:{candidate}"], capture_output=True, timeout=10)
+                devices = self.adb.device_list()
             if not devices:
                 print("No ADB devices found. Make sure the emulator is running.")
                 self.device = None
@@ -64,7 +75,6 @@ class ADBController:
             # emulator left running alongside LDPlayer) — devices[0] would silently
             # pick whichever adb happens to list first, not the one we asked to
             # connect to. Match one of the candidate ports' serials explicitly.
-            candidate_serials = [f"127.0.0.1:{p}" for p in candidates]
             match = next((d for d in devices if d.serial in candidate_serials), None)
             if match:
                 if match.serial != f"127.0.0.1:{self._port}":
@@ -123,6 +133,12 @@ class ADBController:
             except Exception as e:
                 print(f"Failed to capture screen: {e}")
                 self.last_capture_error = str(e)
+                if "not found" in str(e):
+                    # the serial itself is gone (e.g. the transient emulator-5554 entry):
+                    # retrying it is pointless, reconnect right away
+                    self._connect()
+                    if not self.device:
+                        return None
         return None
 
     def _sh(self, cmd, timeout=SHELL_TIMEOUT):
