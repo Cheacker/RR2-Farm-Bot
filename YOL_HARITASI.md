@@ -241,3 +241,9 @@ türlere ayırırım. Her tür için farklı dönme açılarından örnekler `En
   - affreux 02 (1546): castle reached in 64 s (vs 28-33 % with the old inputs), but the king **died at the castle**
     at 72 s: at the path end the follower kept turning (0°, 315°) instead of staying. Fix: stop steering at the end.
 - Hidden Treasures on the result screen: Sweireid (1392) gave 1 rune ("Sonic Blast: Sound Barrier").
+- **End-of-path fix:** when the icon reaches x ≥ 1120 (castle), lift the finger and only cast spells. VN - Ngoc Ky Lan
+  (1918, many towers): castle at 54 s, **100 %, 3 crowns, 80 s**, Hidden Treasures: +320 pet food, 2 runes
+  ("Gargoyle: Carnage", "Skull Tower: Skeleton Bombs"). Two heading changes in the whole match.
+- **Next:** move `Touch` into `src/controller.py`, add a treasure-mode state flow (HOME → Community → Leaderboard →
+  Favorites → base list, skipping death bases) and the follower as its IN_GAME handler; read Hidden Treasures from
+  the result screen into `logs/treasures.csv`. Selective pick-up (detours to off-path drops) comes after that.
