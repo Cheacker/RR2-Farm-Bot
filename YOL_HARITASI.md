@@ -143,7 +143,7 @@ Tanınmayan kareler tekilleştirilip `unknown/`'a kaydedilir; ben etiketleyip im
 ## 4. Fazlar
 
 ### Faz 0 — Sağlamlık ve ölçüm (HEAD üzerine) — kod tamam (2026-11-22), 24 saatlik koşu bekliyor
-Ayrıntı: `CHANGELOG.md` 0.2.0 ve `HANDOFF.md`.
+Ayrıntı: `CHANGELOG.md` 0.2.0 ve `HANDOVER.md`.
 - Şablon aramalarını bölgeyle sınırla (OCR'a geçmeden).
 - Yeni ekranlar: zorunlu güncelleme (Play Store akışı dahil), oyun içi indirme beklemesi, açılış popup zinciri,
   JOIN LEAGUE, RETREAT (kahraman öldü), Shop'tan çıkış, Break Time (~15 dk bekle, tekrar dene).
@@ -226,3 +226,18 @@ türlere ayırırım. Her tür için farklı dönme açılarından örnekler `En
 - **Treasures are reported on the result screen** under "Hidden Treasures:" with type and level (run 3: two runes,
   "Cannon: Swift Shells", "Increased Normal Damage"). This gives a per-match ground truth for evaluation.
 - One uncollected treasure seen on the final frame of run 2: a red/pink gem at (1290,245), off the king's path.
+
+### 5.5 King movement solved (2026-11-25)
+
+- **`input tap` / `input swipe` do not steer the king reliably.** A real finger via `sendevent` on LDPlayer's
+  multitouch device (`/dev/input/event2`, 1600x900, slot 0, tracking id, BTN_TOUCH) does: the king walks toward
+  the finger and the target updates while it is held (user: real taps work, the bot's very short taps stop early).
+  Prototype: `dev_tools/treasure/touch.py` (one persistent `adb shell`; keys via the same device, 9/0 not mapped).
+- **Progress signal:** the king icon on the top bar (y≈33, x≈440→1140) moves right as he advances along the path.
+  Holding "up"/"right" moved it forward, "left"/"down" moved it **back**, so it is a reliable 1-D feedback.
+- **Path follower** (`play5.py`): finger stays down; every screenshot (~1.5 s) compare icon x; keep heading while it
+  advances, else try neighbouring headings (±45°…, reversing last). No map knowledge needed.
+  - 1392-trophy base: 98 %, 2 crowns, castle reached in 51 s, one heading change.
+  - affreux 02 (1546): castle reached in 64 s (vs 28-33 % with the old inputs), but the king **died at the castle**
+    at 72 s: at the path end the follower kept turning (0°, 315°) instead of staying. Fix: stop steering at the end.
+- Hidden Treasures on the result screen: Sweireid (1392) gave 1 rune ("Sonic Blast: Sound Barrier").
