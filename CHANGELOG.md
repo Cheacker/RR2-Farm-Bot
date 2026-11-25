@@ -4,6 +4,12 @@
 
 Uzun, gözetimsiz çalışma için sağlamlık sürümü (Yol Haritası Faz 0).
 
+- **Treasure mode (experimental):** `--mode treasure` attacks your favorite bases (active, at or below
+  `--treasure-max-trophies`, default 2000) with gear set 2. The bot walks the king along the path by itself,
+  using the king icon on the top progress bar as its guide. At the castle it stops and only casts spells.
+  Bases where the king died on the path are skipped from then on. Every match's Hidden Treasures are logged to
+  `logs/treasures.csv`, and the result screen is saved to `logs/treasure_results/`.
+
 - **Kendini kurtaran bot:** yeni `supervisor.py`, bot çökerse ya da 5 dakika boyunca yanıt vermezse onu ve
   LDPlayer'ı otomatik yeniden başlatır. Tüm ADB komutlarının artık zaman sınırı var; donmuş bir bağlantı
   botu sonsuza kadar kilitleyemez.

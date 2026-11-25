@@ -86,6 +86,21 @@ Ana döngü (`RR2Bot.loop`), her turda:
 - **Food prediction not worth it:** the food popup check costs ~6 ms per loop; OCR of the HOME food counter costs
   ~208 ms. Predicting from the counter would cost more than reacting to the popup, which spends nothing.
 
+## 5b. Treasure mode (`--mode treasure`, src/treasure.py)
+
+- Flow: HOME → `COMMUNITY_BTN_COORDS` → COMMUNITY (find `card_leaderboard` title, tap its OPEN at y 790,
+  then `PAGE_NEXT_COORDS`) → FAVORITES → ATTACK_PREP (gear set 2) → GAME_LOAD → IN_GAME → COF → HOME.
+- Favorites rows: found by `btn_fav_attack` (yellow swords; saturation < 60 = inactive). Trophies by OCR, the base
+  by an **image of its name** (`TreasureBases`, `treasure_bases/` gitignored: crops + bases.json). Pick = eligible
+  row with the oldest last attack; scrolls when an older known base is further down.
+- In-match input is a real finger (`ADBController.touch()` → `TouchInput`, sendevent on the multitouch device).
+  `input tap/swipe` don't steer the king. Keys via the same device; 9/0 not mapped (gem boosts).
+- `PathFollower`: icon `icon_king_progress` x on the top bar = progress. Keep heading while it grows, else nearest
+  untried heading. x ≥ 1120 = castle → finger up, spells only. Death before the castle bans the base; at the castle
+  it counts as success (user).
+- Known limit (user, 2026-11-26): the king walks along the path **edge**, so treasures dropped in the middle are
+  missed (about half).
+
 ## 6. Açık işler
 
 - Faz 0 çıktısı: 24 saatlik gözetimli koşu + `tools/report.py` raporu.

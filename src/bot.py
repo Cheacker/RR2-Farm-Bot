@@ -10,6 +10,8 @@ import numpy as np
 from controller import ADBController
 from vision import VisionInterpreter, FULL
 from player_db import PlayerDB
+from treasure import (TreasureBases, PathFollower, read_hidden_treasures, write_treasure_row,
+                      FAV_ROW_TROPHIES, FAV_ROW_NAME)
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FAIL_DEBUG_DIR = os.path.join(ROOT_DIR, "fail_debug")
@@ -22,6 +24,8 @@ os.makedirs(LOG_DIR, exist_ok=True)
 MATCHES_CSV    = os.path.join(LOG_DIR, "matches.csv")   # one row per finished match
 EVENTS_CSV     = os.path.join(LOG_DIR, "events.csv")    # restarts, popups, recoveries
 HEARTBEAT_PATH = os.path.join(LOG_DIR, "heartbeat.txt") # watched by supervisor.py
+TREASURES_CSV  = os.path.join(LOG_DIR, "treasures.csv") # treasure mode: one row per match
+TREASURE_SHOTS = os.path.join(LOG_DIR, "treasure_results")  # result screens (catalog material)
 HEARTBEAT_EVERY = 2  # seconds between heartbeat writes
 KEEP_RUN_LOGS   = 30 # bot_*.log files kept in logs/
 
@@ -107,6 +111,10 @@ FOOD_SHOP_RETRY   = 30 * 60  # min time between two Shop purchase attempts
 # that screen yet). Reported once at startup instead of failing silently.
 OPTIONAL_TEMPLATES = ["btn_archer_boosted", "btn_attack_start_gray"]
 GREEN_BACK_COORDS  = (1430, 85)    # back out of attack prep / loading screen
+# Treasure mode navigation: HOME → Community → Leaderboard card → right arrow → Favorites
+COMMUNITY_BTN_COORDS = (1535, 505)  # HOME, 2nd button from the top right (two smiling faces)
+CARD_OPEN_Y          = 790          # OPEN button under each Community card
+PAGE_NEXT_COORDS     = (1545, 520)  # right arrow: Leaderboard → Favorite Players
 SCROLL_CONFIRM_COORDS = (896, 785) # ranked-list confirm after scroll — on the
                                    # attack-prep screen this is "New Opponent",
                                    # so never tap it without confirming the screen
@@ -132,11 +140,14 @@ class State:
     GOING_BACK         = "GOING_BACK"
     IN_GAME            = "IN_GAME"
     CHAMBER_OF_FORTUNE = "CHAMBER_OF_FORTUNE"
+    COMMUNITY          = "COMMUNITY"    # treasure mode only
+    FAVORITES          = "FAVORITES"    # treasure mode only
 
 
 class RR2Bot:
     def __init__(self, port=21503, template_dir=None, trophy_filter=600, melt_threshold=1_000_000,
-                 drop_trophies=False, ld_index=0, ldconsole=None, capture_inactives=False):
+                 drop_trophies=False, ld_index=0, ldconsole=None, capture_inactives=False,
+                 mode="farm", treasure_max_trophies=2000):
         # Skip ADBController's own connect-on-init: connecting before the startup
         # restart even runs is wasted work whose result gets thrown away the
         # instant the restart happens -- only try after the restart completes.
@@ -207,6 +218,16 @@ class RR2Bot:
         self._hour_capture_secs  = 0.0
         self._hour_events        = 0
         self.db = PlayerDB()
+        # Treasure mode (--mode treasure): favorite bases instead of the trophy list
+        self._mode               = mode
+        self._treasure_max       = treasure_max_trophies
+        self.bases               = TreasureBases() if mode == "treasure" else None
+        self._follower           = None
+        self._target_base        = None   # (base id, trophies) being attacked
+        self._nav_miss           = 0
+        self._fav_scrolls        = 0
+        self._fav_seen           = set()
+        self._fav_last_view      = None
 
         # Per-hour debug log — truncated (not appended) on every bot run, so it
         # always reflects only the current session.
@@ -298,6 +319,12 @@ class RR2Bot:
                 elif self.state == State.GOING_BACK:         self.handle_going_back(screen)
                 elif self.state == State.IN_GAME:            self.handle_in_game(screen)
                 elif self.state == State.CHAMBER_OF_FORTUNE: self.handle_chamber_of_fortune(screen)
+                elif self.state == State.COMMUNITY:          self.handle_community(screen)
+                elif self.state == State.FAVORITES:          self.handle_favorites(screen)
+                # never leave a finger down outside a match
+                if self._follower and self.state != State.IN_GAME:
+                    self._follower.stop()
+                    self._follower = None
 
                 # A handler's primary anchor template missing 10 times in a row usually
                 # means we're not actually on the screen self.state assumes (stuck popup,
@@ -629,6 +656,13 @@ class RR2Bot:
                 print(f"[HOME] Match #{self._match_count} — collecting all resources...")
                 self.adb.tap(*COLLECT_ALL_RESOURCES)
                 time.sleep(0.5)
+            if self._mode == "treasure":
+                print("[HOME] Forge icon found, opening Community (treasure mode)...")
+                self.adb.tap(*COMMUNITY_BTN_COORDS)
+                self._nav_miss = 0
+                self.state = State.COMMUNITY
+                time.sleep(2)
+                return
             print("[HOME] Forge icon found, tapping trophy...")
             self.adb.tap(*TROPHY_COORDS)
             self.state = State.TROPHY_MENU
@@ -731,6 +765,10 @@ class RR2Bot:
         if (self.vision.find_template(screen, "icon_forge", threshold=0.90, region=FULL)
                 or self.vision.find_template(screen, "btn_take_me_back", threshold=0.85, region=FULL)):
             return State.HOME
+        if self.vision.find_template(screen, "title_favorites", threshold=0.85, region=FULL):
+            return State.FAVORITES
+        if self.vision.find_template(screen, "title_community", threshold=0.85, region=FULL):
+            return State.COMMUNITY
         if self.vision.find_template(screen, "btn_start_search", threshold=0.80, region=FULL):
             return State.TROPHY_MENU
         if self.vision.find_multiple_templates(screen, "area_top_opponent", threshold=0.90, region=FULL):
@@ -802,6 +840,13 @@ class RR2Bot:
         opponent unattackable regardless of when we last saw them, so it's recorded
         permanently instead of the 15-minute active-player mark (which is only a "they
         might be online, try again later" guess, not "this matchup can never work")."""
+        if self._mode == "treasure":
+            print(f"[ATTACK_PREP] {reason} — back to Favorites")
+            self.adb.tap(*GREEN_BACK_COORDS)
+            self._target_base = None
+            self.state = State.FAVORITES
+            time.sleep(1)
+            return
         if self._current_target:
             if permanent:
                 self.db.mark_unattackable(self._current_target)
@@ -1059,7 +1104,8 @@ class RR2Bot:
         if self._has_yellow_attack(screen):
             self._anchor_miss_streak = 0
             print("[ATTACK_PREP] Attack button found (OCR), pressing → GAME_LOAD...")
-            self.adb.tap(*GEAR_SET_3_COORDS)
+            # gear set 3 = farming set, set 2 = treasure hunter set (user's setup)
+            self.adb.tap(*(GEAR_SET_2_COORDS if self._mode == "treasure" else GEAR_SET_3_COORDS))
             time.sleep(0.1)
             self.adb.tap(*ATTACK_BTN_COORDS)
             self.state = State.GAME_LOAD
@@ -1132,6 +1178,9 @@ class RR2Bot:
             self._anchor_miss_streak = 0
             print("[GAME_LOAD] Archer button visible, match started!")
             self._skip_top = 0
+            if self._mode == "treasure":
+                self._start_treasure_match()
+                return
             self.adb.tap(*ARCHER_COORDS)
             time.sleep(0.3)
             self.adb.tap(*SECOND_TROOP_SLOT_COORDS)
@@ -1166,6 +1215,12 @@ class RR2Bot:
 
     # ── GOING_BACK ────────────────────────────────────────────────────────────
     def handle_going_back(self, screen):
+        if self._mode == "treasure":
+            print("[GOING_BACK] Tapping green back button → FAVORITES...")
+            self.adb.tap(*GREEN_BACK_COORDS)
+            self.state = State.FAVORITES
+            time.sleep(1)
+            return
         print("[GOING_BACK] Tapping green back button → FILTERED_RANKS...")
         self.adb.tap(*GREEN_BACK_COORDS)
         self._skip_top = 0
@@ -1174,6 +1229,8 @@ class RR2Bot:
 
     # ── IN_GAME ───────────────────────────────────────────────────────────────
     def handle_in_game(self, screen):
+        if self._mode == "treasure":
+            return self.handle_in_game_treasure(screen)
         now = time.time()
 
         drop_coords_ready = DROP_BUTTON_1_COORDS and DROP_BUTTON_2_COORDS and DROP_HOME_COORDS
@@ -1235,6 +1292,176 @@ class RR2Bot:
                 self.adb.tap(*retreat)
                 time.sleep(1.5)
 
+    # ── Treasure mode ─────────────────────────────────────────────────────────
+    def _treasure_nav_failed(self, where):
+        """Navigation lost: close whatever is open and start over from HOME."""
+        self._event("treasure_nav_lost", where)
+        self.adb.tap(*POPUP_CLOSE_COORDS)
+        time.sleep(1.5)
+        self._nav_miss = 0
+        self.state = State.HOME
+
+    def handle_community(self, screen):
+        """Community card carousel → Leaderboard card's OPEN → right arrow → Favorites.
+        The carousel stops at varying positions after a swipe, so the Leaderboard card
+        is located by its title instead of a fixed coordinate."""
+        if self.vision.find_template(screen, "title_favorites", threshold=0.85):
+            self.state = State.FAVORITES
+            return
+        card = self.vision.find_template(screen, "card_leaderboard", threshold=0.85)
+        if card:
+            self._anchor_miss_streak = 0
+            print(f"[COMMUNITY] Leaderboard card at x={card[0]} → OPEN, then → Favorites")
+            self.adb.tap(card[0], CARD_OPEN_Y)
+            time.sleep(3)
+            self.adb.tap(*PAGE_NEXT_COORDS)
+            time.sleep(3)
+            self._nav_miss = 0
+            self._fav_scrolls = 0
+            self._fav_seen = set()
+            self._fav_last_view = None
+            self.state = State.FAVORITES
+            return
+        self._nav_miss += 1
+        if self._nav_miss > 8:
+            return self._treasure_nav_failed("Community: Leaderboard card not found")
+        if self.vision.find_template(screen, "title_community", threshold=0.85):
+            # cards scroll horizontally; alternate a long left swipe and a short right one
+            if self._nav_miss % 3 == 0:
+                self.adb.swipe(500, 500, 1000, 500, 800)
+            else:
+                self.adb.swipe(1300, 500, 300, 500, 1500)
+            time.sleep(1.5)
+        else:
+            self._anchor_miss_streak += 1
+            time.sleep(1)
+
+    def handle_favorites(self, screen):
+        """Pick a favorite base: active (yellow swords), trophies ≤ --treasure-max-trophies,
+        not banned (king died on its path), least recently attacked first."""
+        if not self.vision.find_template(screen, "title_favorites", threshold=0.85):
+            self._nav_miss += 1
+            self._anchor_miss_streak += 1
+            if self.vision.find_template(screen, "title_community", threshold=0.85):
+                self.state = State.COMMUNITY
+            elif self._nav_miss > 6:
+                self._treasure_nav_failed("Favorites: list not found")
+            time.sleep(1)
+            return
+        self._anchor_miss_streak = 0
+        self._nav_miss = 0
+        rows = []
+        for x, y in sorted(self.vision.find_multiple_templates(screen, "btn_fav_attack", threshold=0.80),
+                           key=lambda p: p[1]):
+            if y < 215 or y > 845:
+                continue      # row cut off by the list frame
+            sat = cv2.cvtColor(screen[y - 30:y + 30, x - 35:x + 35], cv2.COLOR_BGR2HSV)[:, :, 1].mean()
+            if sat < 60:
+                continue      # gray swords: inactive player
+            tx1, tdy1, tx2, tdy2 = FAV_ROW_TROPHIES
+            trophies = self.vision.read_region_number(screen, tx1, y + tdy1, tx2, y + tdy2)
+            nx1, ndy1, nx2, ndy2 = FAV_ROW_NAME
+            bid = self.bases.identify(screen[y + ndy1:y + ndy2, nx1:nx2])
+            self.bases.note_trophies(bid, trophies)
+            rows.append((bid, trophies, x, y))
+        view = tuple(r[0] for r in rows)
+        eligible = [r for r in rows if r[1] and r[1] <= self._treasure_max and not self.bases.banned(r[0])]
+        print(f"[FAVORITES] rows: {[(b, t) for b, t, _, _ in rows]} eligible: {[b for b, *_ in eligible]}")
+        pick = min(eligible, key=lambda r: self.bases.last_attack(r[0])) if eligible else None
+        # a known eligible base further down the list that waited longer than the pick?
+        older_elsewhere = pick and any(
+            bid not in view and bid not in self._fav_seen and not m.get("banned")
+            and (m.get("trophies") or 99999) <= self._treasure_max
+            and m.get("last_attack", 0) < self.bases.last_attack(pick[0])
+            for bid, m in self.bases.meta.items())
+        at_end = view == self._fav_last_view or self._fav_scrolls >= 8
+        if pick and (not older_elsewhere or at_end):
+            bid, trophies, x, y = pick
+            print(f"[FAVORITES] Attacking base {bid} ({trophies} trophies)")
+            self._target_base = (bid, trophies)
+            self._current_target = None
+            self.adb.tap(x, y)
+            self._attack_prep_start = time.time()
+            self.state = State.ATTACK_PREP
+            time.sleep(1)
+            return
+        if at_end:
+            self._event("treasure_no_target", f"no active favorite ≤ {self._treasure_max} trophies; waiting 10 min")
+            self.adb.tap(*POPUP_CLOSE_COORDS)
+            self._sleep(10 * 60)
+            self.state = State.HOME
+            return
+        self._fav_seen.update(view)
+        self._fav_last_view = view
+        self._fav_scrolls += 1
+        self.adb.swipe(800, 750, 800, 450, 800)
+        time.sleep(1.5)
+
+    def _start_treasure_match(self):
+        bid = self._target_base[0] if self._target_base else None
+        if bid:
+            self.bases.attacked(bid)
+        self._follower = PathFollower(self.adb.touch(), self.vision)
+        self._follower.start()
+        self._in_game_start = time.time()
+        self._last_in_game_find_state = time.time()
+        self._match_outcome = None
+        self.state = State.IN_GAME
+
+    def handle_in_game_treasure(self, screen):
+        now = time.time()
+        f = self._follower
+        if f is None:   # e.g. resynced into a running match: just take over
+            self._follower = f = PathFollower(self.adb.touch(), self.vision)
+            f.start()
+            self._in_game_start = self._in_game_start or now
+        if now - self._in_game_start > 200:
+            f.stop()
+            self._in_game_start = 0
+            self._restart_game("IN_GAME (treasure): match timeout")
+            self.state = State.HOME
+            return
+        cont = self.vision.find_template(screen, "btn_continue", threshold=0.95)
+        if cont:
+            f.stop()
+            if self._match_outcome is None:
+                self._match_outcome = "castle" if f.at_castle else "finished"
+            time.sleep(3)   # reward counters animate; the panel scrolls to the treasures
+            res = self.adb.current_screen()
+            treasures = read_hidden_treasures(self.vision, res) if res is not None else []
+            if res is not None:
+                os.makedirs(TREASURE_SHOTS, exist_ok=True)
+                cv2.imwrite(os.path.join(TREASURE_SHOTS, f"{time.strftime('%Y%m%d_%H%M%S')}.png"), res)
+            bid, trophies = self._target_base or ("?", "")
+            try:
+                write_treasure_row(TREASURES_CSV, [time.strftime("%Y-%m-%d %H:%M:%S"), bid, trophies,
+                                                   self._match_outcome, f.max_x or "",
+                                                   f"{now - self._in_game_start:.0f}", " | ".join(treasures)])
+            except OSError as e:
+                print(f"[TREASURE] csv write failed: {e}")
+            print(f"[TREASURE] base {bid}: {self._match_outcome}, treasures: {treasures or 'none'}")
+            self.adb.tap(*cont)
+            self._in_game_start = 0
+            self.state = State.CHAMBER_OF_FORTUNE
+            time.sleep(1.25)
+            return
+        retreat = self.vision.find_template(screen, "btn_retreat", threshold=0.85)
+        if retreat:
+            f.stop()
+            bid = self._target_base[0] if self._target_base else None
+            if f.at_castle:
+                self._match_outcome = "castle"      # dying at the castle is fine (user)
+                self._event("hero_died", "at the castle — counts as success")
+            else:
+                self._match_outcome = "died_on_path"
+                self._event("hero_died", f"on the path (icon x={f.max_x}) — base {bid} banned")
+                if bid:
+                    self.bases.ban(bid, f"king died on the path at icon x={f.max_x}")
+            self.adb.tap(*retreat)
+            time.sleep(1.5)
+            return
+        f.step(screen)
+
     # ── Session log helpers ───────────────────────────────────────────────────
     def _log_to_file(self, message):
         """Append a timestamped line to the per-run debug log (SESSION_LOG_PATH).
@@ -1279,7 +1506,7 @@ class RR2Bot:
                             self._match_outcome or "unknown",
                             "" if self._gold_last is None else self._gold_last,
                             "" if self._pearl_last is None else self._pearl_last,
-                            self._trophy_filter])
+                            "treasure" if self._mode == "treasure" else self._trophy_filter])
         except OSError as e:
             print(f"[MATCHES] write failed: {e}")
         self._match_outcome = None
@@ -1506,6 +1733,11 @@ if __name__ == "__main__":
                         help="Melt threshold — melt if gold above this, sell otherwise (100000-32000000, default: 1000000)")
     parser.add_argument("--drop-trophies", choices=["drop_yes", "drop_no"], default="drop_no",
                         help="Drop trophies mode: drop_yes ends match after 3s, drop_no after 180s (default: drop_no)")
+    parser.add_argument("--mode", choices=["farm", "treasure"], default="farm",
+                        help="farm: trophy-filtered attacks (default). treasure: attack favorite bases "
+                             "with gear set 2 and walk the king along the path to collect treasures")
+    parser.add_argument("--treasure-max-trophies", type=int, default=2000,
+                        help="treasure mode: only favorites at or below this many trophies (default 2000)")
     parser.add_argument("--capture-inactives", action="store_true",
                         help="Collection mode: stays on the attack-prep screen rerolling opponents "
                              "forever via the static 'New Opponent' button, saving a screenshot to "
@@ -1537,5 +1769,6 @@ if __name__ == "__main__":
     bot = RR2Bot(port=port, template_dir=template_dir, trophy_filter=trophy_filter,
                  melt_threshold=melt_threshold, drop_trophies=drop_trophies,
                  ld_index=args.ld_index, ldconsole=ldconsole,
-                 capture_inactives=args.capture_inactives)
+                 capture_inactives=args.capture_inactives,
+                 mode=args.mode, treasure_max_trophies=args.treasure_max_trophies)
     bot.loop()

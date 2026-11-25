@@ -238,6 +238,99 @@ class ADBController:
             self._sh(f"monkey -p {package} -c android.intent.category.LAUNCHER 1")
         time.sleep(wait)
 
+    # ── Real finger input (treasure mode) ─────────────────────────────────────
+    def touch(self):
+        """A TouchInput bound to the current device (recreated after a reconnect)."""
+        if not self.device:
+            return None
+        t = getattr(self, "_touch", None)
+        if t is None or t.serial != self.device.serial or not t.alive():
+            if t is not None:
+                t.close()
+            self._touch = TouchInput(self.device.serial, self._find_touch_device())
+        return self._touch
+
+    def _find_touch_device(self):
+        """The /dev/input node that reports multitouch positions (LDPlayer: event2)."""
+        try:
+            current = None
+            for line in self._sh("getevent -pl").splitlines():
+                if line.startswith("add device"):
+                    current = line.split(":", 1)[1].strip()
+                elif "ABS_MT_POSITION_X" in line and current:
+                    return current
+        except Exception as e:
+            print(f"[ADB] touch device lookup failed: {e}")
+        return "/dev/input/event2"
+
+
+class TouchInput:
+    """A finger that can stay down and move, via sendevent on the emulator's touch device.
+
+    `input tap/swipe` produce very short (or motionless) touches; in a match the king
+    walks toward where a finger *is* and keeps updating the target while it is held,
+    which those commands can't express. One persistent `adb shell` takes the event
+    lines, so a move costs no process spawn. Keys go through the same device, using
+    Linux key codes; 9 and 0 are deliberately absent (15-gem boosts in a match)."""
+
+    EV_SYN, EV_KEY, EV_ABS = 0, 1, 3
+    ABS_MT_SLOT, ABS_MT_X, ABS_MT_Y, ABS_MT_TRACKING_ID, ABS_MT_PRESSURE = 47, 53, 54, 57, 58
+    BTN_TOUCH, BTN_TOOL_FINGER = 330, 325
+    KEYS = {"1": 2, "2": 3, "3": 4, "5": 6, "6": 7, "7": 8, "q": 16, "w": 17, "e": 18}
+
+    def __init__(self, serial, dev):
+        self.serial, self.dev = serial, dev
+        self.is_down = False
+        self._tid = 100
+        self._p = subprocess.Popen(["adb", "-s", serial, "shell"], stdin=subprocess.PIPE,
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True)
+
+    def alive(self):
+        return self._p.poll() is None
+
+    def _send(self, events):
+        try:
+            self._p.stdin.write("".join(f"sendevent {self.dev} {t} {c} {v}\n" for t, c, v in events))
+            self._p.stdin.flush()
+        except (OSError, ValueError) as e:
+            print(f"[TOUCH] send failed: {e}")
+
+    def down(self, x, y):
+        self._tid = self._tid % 60000 + 1
+        self._send([(self.EV_ABS, self.ABS_MT_SLOT, 0), (self.EV_ABS, self.ABS_MT_TRACKING_ID, self._tid),
+                    (self.EV_ABS, self.ABS_MT_X, int(x)), (self.EV_ABS, self.ABS_MT_Y, int(y)),
+                    (self.EV_ABS, self.ABS_MT_PRESSURE, 1), (self.EV_KEY, self.BTN_TOUCH, 1),
+                    (self.EV_KEY, self.BTN_TOOL_FINGER, 1), (self.EV_SYN, 0, 0)])
+        self.is_down = True
+
+    def move(self, x, y):
+        if not self.is_down:
+            return self.down(x, y)
+        self._send([(self.EV_ABS, self.ABS_MT_SLOT, 0), (self.EV_ABS, self.ABS_MT_X, int(x)),
+                    (self.EV_ABS, self.ABS_MT_Y, int(y)), (self.EV_SYN, 0, 0)])
+
+    def up(self):
+        self._send([(self.EV_ABS, self.ABS_MT_SLOT, 0), (self.EV_ABS, self.ABS_MT_TRACKING_ID, 4294967295),
+                    (self.EV_KEY, self.BTN_TOUCH, 0), (self.EV_KEY, self.BTN_TOOL_FINGER, 0),
+                    (self.EV_SYN, 0, 0)])
+        self.is_down = False
+
+    def keys(self, names):
+        ev = []
+        for n in names:
+            k = self.KEYS[n]   # KeyError for anything not whitelisted (e.g. the gem keys 9/0)
+            ev += [(self.EV_KEY, k, 1), (self.EV_SYN, 0, 0), (self.EV_KEY, k, 0), (self.EV_SYN, 0, 0)]
+        self._send(ev)
+
+    def close(self):
+        if self.is_down:
+            self.up()
+        try:
+            self._p.stdin.write("exit\n"); self._p.stdin.flush()
+            self._p.wait(timeout=5)
+        except Exception:
+            self._p.kill()
+
 
 if __name__ == "__main__":
     ctrl = ADBController()

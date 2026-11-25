@@ -14,7 +14,8 @@ NAME_REGION = (-705, -20, 525, 40)
 SILENT_ON_MISS = {
     "btn_continue", "btn_melt", "btn_retreat",
     "popup_break_time", "popup_update", "title_shop", "text_downloading",
-    "title_not_enough_food",
+    "title_not_enough_food", "icon_king_progress", "text_hidden_treasures", "icon_result_gold",
+    "title_community", "card_leaderboard", "title_favorites",
 }
 
 # Pass region=FULL to force a whole-screen search (e.g. the _find_state fallback).
@@ -63,6 +64,14 @@ DEFAULT_REGIONS = {
     "btn_big_collect":       (700, 480, 1300, 780),
     # "I am the KING!" (account opened on another device), button at (810, 484)
     "btn_king_claim":        (560, 380, 1060, 590),
+    # Treasure mode (2026-11-25/26)
+    "title_community":       (0, 20, 450, 150),
+    "card_leaderboard":      (0, 180, 1600, 290),   # card position varies with the swipe
+    "title_favorites":       (0, 20, 620, 150),
+    "btn_fav_attack":        (1340, 190, 1490, 870),
+    "icon_king_progress":    (420, 8, 1200, 60),     # top progress bar, moves right
+    "text_hidden_treasures": (850, 350, 1300, 700),
+    "icon_result_gold":      (820, 480, 960, 600),
     # btn_play_update lives in the Play Store, whose layout we don't control: full screen.
 }
 
