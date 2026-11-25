@@ -230,6 +230,9 @@ class RR2Bot:
         self._fav_scrolls        = 0
         self._fav_seen           = set()
         self._fav_last_view      = None
+        self._fav_best           = None
+        self._fav_force          = None
+        self._fav_scrolls_done   = 4   # swipes needed to get back to the top
 
         # Per-hour debug log — truncated (not appended) on every bot run, so it
         # always reflects only the current session.
@@ -1347,6 +1350,7 @@ class RR2Bot:
         self._fav_scrolls = 0
         self._fav_seen = set()
         self._fav_last_view = None
+        self._fav_best = None      # best eligible base passed during this scan
 
     def handle_favorites(self, screen):
         """Pick a favorite base: active (yellow swords), trophies ≤ --treasure-max-trophies,
@@ -1375,21 +1379,26 @@ class RR2Bot:
             nx1, ndy1, nx2, ndy2 = FAV_ROW_NAME
             bid = self.bases.identify(screen[y + ndy1:y + ndy2, nx1:nx2])
             self.bases.note_trophies(bid, trophies)
+            self.bases.seen_active(bid)
             rows.append((bid, trophies, x, y))
         view = tuple(r[0] for r in rows)
         eligible = [r for r in rows if r[1] and r[1] <= self._treasure_max and self.bases.available(r[0])]
         print(f"[FAVORITES] rows: {[(b, t) for b, t, _, _ in rows]} eligible: {[b for b, *_ in eligible]}")
-        pick = min(eligible, key=lambda r: self.bases.last_attack(r[0])) if eligible else None
-        # a known eligible base further down the list that waited longer than the pick?
-        older_elsewhere = pick and any(
+        forced = [r for r in eligible if r[0] == self._fav_force]
+        pick = forced[0] if forced else (
+            min(eligible, key=lambda r: self.bases.last_attack(r[0])) if eligible else None)
+        # a base seen active lately, further down the list, that waited longer than the pick?
+        older_elsewhere = not forced and pick and any(
             bid not in view and bid not in self._fav_seen and self.bases.available(bid)
+            and self.bases.recently_active(bid)
             and (m.get("trophies") or 99999) <= self._treasure_max
             and m.get("last_attack", 0) < self.bases.last_attack(pick[0])
             for bid, m in self.bases.meta.items())
-        at_end = view == self._fav_last_view or self._fav_scrolls >= 8
-        if pick and (not older_elsewhere or at_end):
+        at_end = (view == self._fav_last_view or not view) or self._fav_scrolls >= 8
+        if pick and (forced or not older_elsewhere or at_end):
             bid, trophies, x, y = pick
             print(f"[FAVORITES] Attacking base {bid} ({trophies} trophies)")
+            self._fav_force = None
             self._target_base = (bid, trophies)
             self._current_target = None
             self.adb.tap(x, y)
@@ -1397,7 +1406,22 @@ class RR2Bot:
             self.state = State.ATTACK_PREP
             time.sleep(1)
             return
+        for r in eligible:
+            if self._fav_best is None or self.bases.last_attack(r[0]) < self.bases.last_attack(self._fav_best):
+                self._fav_best = r[0]
+        if at_end and self._fav_best and self._fav_force != self._fav_best:
+            print(f"[FAVORITES] End of list — scrolling back up to base {self._fav_best}")
+            self._fav_force = self._fav_best
+            best = self._fav_best
+            self._fav_reset()
+            self._fav_best = best
+            for _ in range(self._fav_scrolls_done):
+                self.adb.swipe(800, 300, 800, 750, 500)
+                time.sleep(0.6)
+            time.sleep(1)
+            return
         if at_end:
+            self._fav_force = None
             self._event("treasure_no_target", f"no active favorite ≤ {self._treasure_max} trophies; waiting 10 min")
             self.adb.tap(*POPUP_CLOSE_COORDS)
             self._sleep(10 * 60)
@@ -1406,6 +1430,7 @@ class RR2Bot:
         self._fav_seen.update(view)
         self._fav_last_view = view
         self._fav_scrolls += 1
+        self._fav_scrolls_done = self._fav_scrolls + 1
         self.adb.swipe(800, 750, 800, 450, 800)
         time.sleep(1.5)
 
