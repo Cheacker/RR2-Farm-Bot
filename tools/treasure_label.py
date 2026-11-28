@@ -13,7 +13,9 @@ Mouse:  left click = mark (current class)   right click = remove the nearest mar
 Keys:   d / space = next frame    a = previous frame    n = next match
         1 = class "treasure" (the item on the ground)   2 = class "beam" (foot of a light beam)
         h = glow heat map on/off   c = copy the previous frame's marks   q / Esc = save and quit
+        s = beam suggestions on/off (yellow dashed circles)   g = take every suggestion as a "beam" mark
 The title bar shows what the result screen said the match gave (result.json).
+A beam stays until its treasure is picked up, so the same treasure shows up in many frames: mark it in each.
 """
 import argparse
 import glob
@@ -26,7 +28,7 @@ import numpy as np
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "src"))
-from treasure_vision import glow_overlay  # noqa: E402
+from treasure_vision import beam_candidates, glow_overlay  # noqa: E402
 
 FRAMES_DIR = os.path.join(ROOT, "logs", "treasure_frames")
 CLASSES = {ord("1"): "treasure", ord("2"): "beam"}
@@ -71,8 +73,15 @@ def remove_nearest(marks, x, y):
         marks.pop(i)
 
 
-def render(frame, marks, cls, heat, header, scale):
+def dashed_circle(img, center, r, color):
+    for a in range(0, 360, 30):
+        cv2.ellipse(img, center, (r, r), 0, a, a + 15, color, 2)
+
+
+def render(frame, marks, cls, heat, header, scale, hints=()):
     img = glow_overlay(frame) if heat else frame.copy()
+    for h in hints:
+        dashed_circle(img, h["foot"], 34, (0, 255, 255))
     for m in marks:
         c = COLORS.get(m["cls"], (255, 255, 255))
         cv2.circle(img, (m["x"], m["y"]), 26, c, 3)
@@ -112,10 +121,12 @@ def label_match(match_dir, scale, state):
         fname = files[i]
         frame = cv2.imread(os.path.join(match_dir, fname))
         cur["marks"] = [dict(m) for m in frames.get(fname, [])]
+        hints = beam_candidates(frame) if frame is not None else []
         while True:
             reviewed = sum(1 for f in files if f in frames)
             header = f"{name}  {i + 1}/{len(files)}  {fname}  reviewed {reviewed}  |  {res}"
-            cv2.imshow(win, render(frame, cur["marks"], state["cls"], state["heat"], header, scale))
+            shown = hints if state["hints"] else ()
+            cv2.imshow(win, render(frame, cur["marks"], state["cls"], state["heat"], header, scale, shown))
             k = cv2.waitKey(30) & 0xFF
             if k == 255:
                 if cv2.getWindowProperty(win, cv2.WND_PROP_VISIBLE) < 1:
@@ -126,6 +137,10 @@ def label_match(match_dir, scale, state):
                 state["cls"] = CLASSES[k]
             elif k == ord("h"):
                 state["heat"] = not state["heat"]
+            elif k == ord("s"):
+                state["hints"] = not state["hints"]
+            elif k == ord("g"):
+                cur["marks"] += [{"x": h["foot"][0], "y": h["foot"][1], "cls": "beam"} for h in hints]
             elif k == ord("c") and i > 0:
                 cur["marks"] += [dict(m) for m in frames.get(files[i - 1], [])]
             elif k in (ord("d"), ord(" "), ord("a"), ord("n"), ord("q"), 27):
@@ -163,7 +178,7 @@ def main():
         print("Nothing to label (use --all to revisit finished matches).")
         return
     print(f"{len(matches)} match(es) to label")
-    state = {"cls": "treasure", "heat": False}
+    state = {"cls": "treasure", "heat": False, "hints": True}
     for d in matches:
         if label_match(d, args.scale, state) == "quit":
             break

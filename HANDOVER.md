@@ -108,8 +108,15 @@ Ana döngü (`RR2Bot.loop`), her turda:
   beam's warm-light excess (`treasure_vision.glow`) scores ~40-52 against its sides; the background scores 15-35.
 - **A hand-made beam detector does not work on real frames** (`dev_tools/treasure/beam3.py`, `beam4.py`): over
   181 frames it gave 2-5 false hits per frame (ice crystals, spell explosions, HUD, the victory screen). Even with
-  "must reach the top" + score >= 20, 68 hits, nearly all wrong. Beams are short-lived, sometimes white and
-  slanted, and frames are ~1.2 s apart. So labels come from a human, not from the detector.
+  "must reach the top" + score >= 20, 68 hits, nearly all wrong. Beams are sometimes white and slanted, and
+  units/spells cover them. So labels come from a human, not from the detector.
+- **A beam stays until its treasure is collected** (user, 2026-11-28); it only seems to vanish when the camera
+  moves or units cover it. So one treasure appears in many frames and a detector with partial recall is enough.
+- Wider HUD mask (Q/W portraits up to x 330, match timer) cut the hints to 20 over 181 frames;
+  `treasure_vision.beam_candidates` (~0.2 s/frame) is shown as yellow dashed hints in the labeler (`g` accepts).
+  Example 004 0033.5: the hint lands exactly on a purple treasure at the beam's foot; the second beam's gem was missed.
+- Camera shift between frames could not be measured: phase correlation locks onto the mask edges, and ORB+RANSAC
+  finds only 2-7 inliers in most pairs (1.2 s apart, crowded battle). So no cross-frame beam tracking for now.
 - Pipeline: `tools/treasure_label.py` (click to mark items/beam feet per frame, writes `labels.json` next to
   the frames; every frame stepped past counts as reviewed, empty = negative) -> `tools/treasure_dataset.py`
   (96 px crops into `dataset/treasure/{treasure,beam,neg,neg_hard}/` + `index.csv`; `neg_hard` = brightest
