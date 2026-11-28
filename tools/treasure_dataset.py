@@ -123,7 +123,11 @@ def main():
             if frame is None:
                 continue
             n_frames += 1
+            world = world_mask(*frame.shape[:2])
             for j, m in enumerate(marks):
+                if not world[min(max(m["y"], 0), world.shape[0] - 1), min(max(m["x"], 0), world.shape[1] - 1)]:
+                    counts["(under HUD, left out)"] = counts.get("(under HUD, left out)", 0) + 1
+                    continue                   # crop would be mostly HUD; the bot ignores the HUD anyway
                 side = mark_side(m, args.size)
                 step = max(side // 12, 2)
                 for s, (dx, dy) in enumerate(SHIFTS):

@@ -8,6 +8,8 @@ Usage:
   uv run python tools/treasure_label.py                 # matches not finished yet
   uv run python tools/treasure_label.py --all           # every match
   uv run python tools/treasure_label.py --match 20261126_010553_b004
+  uv run python tools/treasure_label.py --match 20261126_010553_b004 --frame 0033.5_838.jpg
+  (find wrong marks first with tools/treasure_review.py)
 
 Mouse:  left drag = box around the treasure (preferred: gives its size)   left click = point mark
         right click = remove the nearest mark, or dismiss the nearest suggestion (saved as a "not a treasure" example)
@@ -134,7 +136,7 @@ def render(frame, marks, cls, heat, header, scale, hints=(), heat_img=None, skip
     return img
 
 
-def label_match(match_dir, scale, state):
+def label_match(match_dir, scale, state, start_frame=None):
     """Returns 'quit' or 'next'."""
     files = frame_files(match_dir)
     if not files:
@@ -147,6 +149,8 @@ def label_match(match_dir, scale, state):
     res = result_text(match_dir)
     # start at the first frame not reviewed yet
     i = next((k for k, f in enumerate(files) if f not in frames), 0)
+    if start_frame in files:
+        i = files.index(start_frame)
     win = "treasure labels"
     cv2.namedWindow(win, cv2.WINDOW_AUTOSIZE)
     cur = {"marks": None, "hints": None, "rejected": None, "down": None, "drag": None}
@@ -232,6 +236,7 @@ def label_match(match_dir, scale, state):
 def main():
     ap = argparse.ArgumentParser(description="Mark treasures on saved treasure-mode frames.")
     ap.add_argument("--match", help="one match folder name (or path)")
+    ap.add_argument("--frame", help="with --match: open at this frame (e.g. 0033.5_838.jpg)")
     ap.add_argument("--all", action="store_true", help="include matches already finished")
     ap.add_argument("--scale", type=float, default=0.8, help="window scale (default 0.8)")
     args = ap.parse_args()
@@ -249,7 +254,7 @@ def main():
     print(f"{len(matches)} match(es) to label")
     state = {"cls": "treasure", "heat": False, "hints": True}
     for d in matches:
-        if label_match(d, args.scale, state) == "quit":
+        if label_match(d, args.scale, state, args.frame) == "quit":
             break
     cv2.destroyAllWindows()
 

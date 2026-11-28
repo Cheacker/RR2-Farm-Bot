@@ -123,7 +123,10 @@ Ana döngü (`RR2Bot.loop`), her turda:
   `tools/treasure_dataset.py` (crops scaled to 96 px into `dataset/treasure/{treasure,beam,neg,neg_hard}/`
   + `index.csv`; boxes cropped 1.3x their longer side, negatives at random scales; `neg_hard` = dismissed
   suggestions + brightest glow spots away from marks; skipped frames left out). Treasures are often larger
-  than 52 px and sit among units/effects: keep those (real conditions), skip only when unrecognisable. Next: once there are ~100+ marked items, train a small classifier on the crops,
+  than 52 px and sit among units/effects: keep those (real conditions), skip only when unrecognisable.
+- `tools/treasure_review.py` -> `dataset/review_marks.jpg`: numbered tile per mark to catch wrong ones; fix with
+  `treasure_label.py --match <m> --frame <f>`. Marks centred under the HUD are left out of the dataset (crop is
+  mostly HUD; the detector ignores the HUD): 10 of 34 on 2026-11-28. Next: once there are ~100+ marked items, train a small classifier on the crops,
   then a detector (YOLO-nano class) over full frames; then the PathFollower detour.
 
 ## 6. Açık işler

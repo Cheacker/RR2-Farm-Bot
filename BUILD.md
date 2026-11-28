@@ -31,6 +31,7 @@ uv run python tools/check_regions.py fail_debug <ekran-klasörü>  # şablon bö
 
 ```powershell
 uv run python tools/treasure_label.py      # karelerde hazineleri tıklayarak işaretle (tuşlar: dosyanın başında)
+uv run python tools/treasure_review.py     # tüm işaretler tek sayfada: dataset/review_marks.jpg (yanlışları bul)
 uv run python tools/treasure_dataset.py    # işaretlerden kırpıntı veri seti: dataset/treasure/
 ```
 
