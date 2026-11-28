@@ -97,7 +97,10 @@ def main():
             labels = json.load(f)
         frames = labels.get("frames", {})
         rejected = labels.get("rejected", {})
+        skipped = set(labels.get("skipped", []))          # treasure hidden: neither positive nor negative
         for fname, marks in sorted(frames.items()):
+            if fname in skipped:
+                continue
             frame = cv2.imread(os.path.join(match_dir, fname))
             if frame is None:
                 continue

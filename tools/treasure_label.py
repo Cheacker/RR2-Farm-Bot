@@ -15,6 +15,8 @@ Keys:   d / space = next frame    a = previous frame    n = next match
         1 = class "treasure" (the item on the ground)   2 = class "beam" (foot of a light beam)
         h = glow heat map on/off   c = copy the previous frame's marks   q / Esc = save and quit
         s = beam suggestions on/off (yellow dashed circles)   g = take every suggestion as a "beam" mark
+        x = skip this frame on/off (treasure hidden, e.g. behind a tower: the frame stays out of the dataset)
+Keys work with Caps Lock on too.
 The title bar shows what the result screen said the match gave (result.json).
 A beam stays until its treasure is picked up, so the same treasure shows up in many frames: mark it in each.
 """
@@ -89,8 +91,14 @@ def dashed_circle(img, center, r, color):
         cv2.ellipse(img, center, (r, r), 0, a, a + 15, color, 2)
 
 
-def render(frame, marks, cls, heat, header, scale, hints=()):
-    img = glow_overlay(frame) if heat else frame.copy()
+def render(frame, marks, cls, heat, header, scale, hints=(), heat_img=None, skipped=False):
+    if heat:
+        img = (heat_img if heat_img is not None else glow_overlay(frame)).copy()
+    else:
+        img = frame.copy()
+    if skipped:
+        cv2.rectangle(img, (0, 0), (img.shape[1] - 1, img.shape[0] - 1), (0, 0, 255), 12)
+        cv2.putText(img, "SKIPPED (x)", (img.shape[1] // 2 - 150, 90), 0, 1.5, (0, 0, 255), 4)
     for h in hints:
         dashed_circle(img, (h["x"], h["y"]), 34, (0, 255, 255))
     for m in marks:
@@ -113,6 +121,7 @@ def label_match(match_dir, scale, state):
     labels = load_labels(match_dir)
     frames = labels["frames"]
     rejected = labels.setdefault("rejected", {})
+    skipped = set(labels.get("skipped", []))
     name = os.path.basename(match_dir)
     res = result_text(match_dir)
     # start at the first frame not reviewed yet
@@ -139,18 +148,28 @@ def label_match(match_dir, scale, state):
         cur["marks"] = [dict(m) for m in frames.get(fname, [])]
         cur["rejected"] = [dict(r) for r in rejected.get(fname, [])]
         cur["hints"] = hint_points(frame, cur["rejected"] + cur["marks"]) if frame is not None else []
+        heat_img = None
         while True:
             reviewed = sum(1 for f in files if f in frames)
             header = f"{name}  {i + 1}/{len(files)}  {fname}  reviewed {reviewed}  |  {res}"
             shown = cur["hints"] if state["hints"] else ()
-            cv2.imshow(win, render(frame, cur["marks"], state["cls"], state["heat"], header, scale, shown))
-            k = cv2.waitKey(30) & 0xFF
-            if k == 255:
+            if state["heat"] and heat_img is None:
+                heat_img = glow_overlay(frame)          # once per frame, not every redraw
+            cv2.imshow(win, render(frame, cur["marks"], state["cls"], state["heat"], header, scale, shown,
+                                   heat_img, fname in skipped))
+            k = cv2.waitKey(30)
+            if k == -1:
                 if cv2.getWindowProperty(win, cv2.WND_PROP_VISIBLE) < 1:
                     k = ord("q")
                 else:
                     continue
-            if k in CLASSES:
+            k &= 0xFF
+            if ord("A") <= k <= ord("Z"):                # Caps Lock / Shift
+                k += 32
+            if k == ord("x"):
+                skipped.symmetric_difference_update({fname})
+                labels["skipped"] = sorted(skipped)
+            elif k in CLASSES:
                 state["cls"] = CLASSES[k]
             elif k == ord("h"):
                 state["heat"] = not state["heat"]
