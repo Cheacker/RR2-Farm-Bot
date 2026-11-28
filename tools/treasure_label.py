@@ -9,7 +9,7 @@ Usage:
   uv run python tools/treasure_label.py --all           # every match
   uv run python tools/treasure_label.py --match 20261126_010553_b004
 
-Mouse:  left click = mark (current class)
+Mouse:  left drag = box around the treasure (preferred: gives its size)   left click = point mark
         right click = remove the nearest mark, or dismiss the nearest suggestion (saved as a "not a treasure" example)
 Keys:   d / space = next frame    a = previous frame    n = next match
         1 = class "treasure" (the item on the ground)   2 = class "beam" (foot of a light beam)
@@ -38,6 +38,7 @@ CLASSES = {ord("1"): "treasure", ord("2"): "beam"}
 COLORS = {"treasure": (0, 255, 0), "beam": (0, 200, 255)}
 REMOVE_RADIUS = 40
 HINT_RADIUS = 50
+MIN_BOX = 12              # a drag shorter than this is a click
 
 
 def frame_files(match_dir):
@@ -68,10 +69,23 @@ def result_text(match_dir):
     return f"{r.get('outcome')}: " + (" | ".join(r.get("hidden_treasures") or []) or "-")
 
 
+def make_mark(x0, y0, x1, y1, cls):
+    """A click gives a point mark; a drag of at least MIN_BOX px gives a box (centre + size)."""
+    if abs(x1 - x0) < MIN_BOX and abs(y1 - y0) < MIN_BOX:
+        return {"x": x0, "y": y0, "cls": cls}
+    w, h = max(abs(x1 - x0), MIN_BOX), max(abs(y1 - y0), MIN_BOX)
+    return {"x": (x0 + x1) // 2, "y": (y0 + y1) // 2, "w": w, "h": h, "cls": cls}
+
+
 def remove_nearest(marks, x, y, radius=REMOVE_RADIUS):
-    """Removes and returns the mark nearest to (x, y) within `radius`, else None."""
+    """Removes and returns the mark under (x, y) (a box containing it, else the nearest
+    within `radius`), else None."""
     if not marks:
         return None
+    inside = [k for k, m in enumerate(marks)
+              if "w" in m and abs(m["x"] - x) <= m["w"] / 2 and abs(m["y"] - y) <= m["h"] / 2]
+    if inside:
+        return marks.pop(inside[-1])
     d = [(m["x"] - x) ** 2 + (m["y"] - y) ** 2 for m in marks]
     i = int(np.argmin(d))
     if d[i] <= radius ** 2:
@@ -91,7 +105,7 @@ def dashed_circle(img, center, r, color):
         cv2.ellipse(img, center, (r, r), 0, a, a + 15, color, 2)
 
 
-def render(frame, marks, cls, heat, header, scale, hints=(), heat_img=None, skipped=False):
+def render(frame, marks, cls, heat, header, scale, hints=(), heat_img=None, skipped=False, drag=None):
     if heat:
         img = (heat_img if heat_img is not None else glow_overlay(frame)).copy()
     else:
@@ -103,8 +117,15 @@ def render(frame, marks, cls, heat, header, scale, hints=(), heat_img=None, skip
         dashed_circle(img, (h["x"], h["y"]), 34, (0, 255, 255))
     for m in marks:
         c = COLORS.get(m["cls"], (255, 255, 255))
-        cv2.circle(img, (m["x"], m["y"]), 26, c, 3)
-        cv2.putText(img, m["cls"][0].upper(), (m["x"] + 28, m["y"] + 8), 0, 0.9, c, 2)
+        if "w" in m:
+            x0, y0 = m["x"] - m["w"] // 2, m["y"] - m["h"] // 2
+            cv2.rectangle(img, (x0, y0), (x0 + m["w"], y0 + m["h"]), c, 3)
+            cv2.putText(img, m["cls"][0].upper(), (x0 + m["w"] + 4, y0 + 22), 0, 0.9, c, 2)
+        else:
+            cv2.circle(img, (m["x"], m["y"]), 26, c, 3)
+            cv2.putText(img, m["cls"][0].upper(), (m["x"] + 28, m["y"] + 8), 0, 0.9, c, 2)
+    if drag is not None:
+        cv2.rectangle(img, drag[:2], drag[2:], COLORS.get(cls, (255, 255, 255)), 2)
     cv2.rectangle(img, (0, 0), (img.shape[1], 34), (0, 0, 0), -1)
     cv2.putText(img, f"{header}   [mark: {cls}]{'  [heat]' if heat else ''}", (8, 24), 0, 0.7,
                 (255, 255, 255), 2)
@@ -128,12 +149,19 @@ def label_match(match_dir, scale, state):
     i = next((k for k, f in enumerate(files) if f not in frames), 0)
     win = "treasure labels"
     cv2.namedWindow(win, cv2.WINDOW_AUTOSIZE)
-    cur = {"marks": None, "hints": None, "rejected": None}
+    cur = {"marks": None, "hints": None, "rejected": None, "down": None, "drag": None}
 
     def on_mouse(event, x, y, flags, _):
         fx, fy = int(x / scale), int(y / scale)
         if event == cv2.EVENT_LBUTTONDOWN:
-            cur["marks"].append({"x": fx, "y": fy, "cls": state["cls"]})
+            cur["down"] = (fx, fy)
+        elif event == cv2.EVENT_MOUSEMOVE and cur["down"] is not None:
+            cur["drag"] = cur["down"] + (fx, fy)
+        elif event == cv2.EVENT_LBUTTONUP and cur["down"] is not None:
+            x0, y0 = cur["down"]
+            cur["down"] = cur["drag"] = None
+            mark = make_mark(x0, y0, fx, fy, state["cls"])
+            cur["marks"].append(mark)
         elif event == cv2.EVENT_RBUTTONDOWN:
             # a mark first; otherwise dismiss a suggestion (kept as a hard negative)
             if remove_nearest(cur["marks"], fx, fy) is None and state["hints"]:
@@ -156,7 +184,7 @@ def label_match(match_dir, scale, state):
             if state["heat"] and heat_img is None:
                 heat_img = glow_overlay(frame)          # once per frame, not every redraw
             cv2.imshow(win, render(frame, cur["marks"], state["cls"], state["heat"], header, scale, shown,
-                                   heat_img, fname in skipped))
+                                   heat_img, fname in skipped, cur["drag"]))
             k = cv2.waitKey(30)
             if k == -1:
                 if cv2.getWindowProperty(win, cv2.WND_PROP_VISIBLE) < 1:

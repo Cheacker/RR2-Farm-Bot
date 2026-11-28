@@ -2,11 +2,13 @@
 Build a crop dataset from the treasure labels (tools/treasure_label.py).
 
 For every reviewed frame:
-  - each mark -> a crop in dataset/treasure/<class>/ (plus small shifted copies)
+  - each mark -> a crop in dataset/treasure/<class>/ (plus small shifted copies); a box mark is
+    cropped as a square 30 % larger than its longer side, a point mark at --size; all crops are
+    scaled to --size x --size
+dataset/treasure/index.csv: file, class, match, frame, x, y, side (crop side in frame px).
   - hard negatives: beam suggestions the labeler dismissed, and the brightest glow spots of the
     world area that are not near a mark
   - random negatives from the world area, away from every mark
-dataset/treasure/index.csv lists every crop (file, class, match, frame, x, y).
 The folder is rebuilt from scratch on every run.
 
 Usage:
@@ -30,11 +32,23 @@ from treasure_vision import crop, glow, world_mask  # noqa: E402
 
 FRAMES_DIR = os.path.join(ROOT, "logs", "treasure_frames")
 OUT_DIR = os.path.join(ROOT, "dataset", "treasure")
-SHIFTS = [(0, 0), (-8, 0), (8, 0), (0, -8), (0, 8)]
+SHIFTS = [(0, 0), (-1, 0), (1, 0), (0, -1), (0, 1)]   # in units of 1/12 of the crop side
+MARGIN = 1.3              # a box is cropped as a square 30 % larger than its longer side
+
+
+def mark_side(m, size):
+    """Crop side in frame px: box marks by their size, point marks the default size."""
+    return max(int(max(m["w"], m["h"]) * MARGIN), 32) if "w" in m else size
 
 
 def far_from(x, y, marks, dist):
-    return all((m["x"] - x) ** 2 + (m["y"] - y) ** 2 > dist ** 2 for m in marks)
+    return all((m["x"] - x) ** 2 + (m["y"] - y) ** 2 > (dist + max(m.get("w", 0), m.get("h", 0)) / 2) ** 2
+               for m in marks)
+
+
+def scaled_crop(frame, x, y, side, size):
+    c = crop(frame, x, y, side)
+    return c if side == size else cv2.resize(c, (size, size), interpolation=cv2.INTER_AREA)
 
 
 def hard_points(frame, marks, n, dist):
@@ -82,13 +96,17 @@ def main():
     counts = {}
     n_frames = 0
 
-    def put(img, cls, match, fname, x, y, tag):
+    def put(frame, cls, match, fname, x, y, side, tag):
         d = os.path.join(OUT_DIR, cls)
         os.makedirs(d, exist_ok=True)
         name = f"{match}_{os.path.splitext(fname)[0]}_{tag}.png"
-        cv2.imwrite(os.path.join(d, name), img)
-        rows.append([f"{cls}/{name}", cls, match, fname, x, y])
+        cv2.imwrite(os.path.join(d, name), scaled_crop(frame, x, y, side, args.size))
+        rows.append([f"{cls}/{name}", cls, match, fname, x, y, side])
         counts[cls] = counts.get(cls, 0) + 1
+
+    def neg_side():
+        # negatives at the same spread of scales as the boxes, so size alone gives nothing away
+        return int(rng.integers(args.size * 2 // 3, args.size * 2 + 1))
 
     for lp in sorted(glob.glob(os.path.join(FRAMES_DIR, "*", "labels.json"))):
         match_dir = os.path.dirname(lp)
@@ -106,19 +124,20 @@ def main():
                 continue
             n_frames += 1
             for j, m in enumerate(marks):
+                side = mark_side(m, args.size)
+                step = max(side // 12, 2)
                 for s, (dx, dy) in enumerate(SHIFTS):
-                    put(crop(frame, m["x"] + dx, m["y"] + dy, args.size), m["cls"], match, fname,
-                        m["x"] + dx, m["y"] + dy, f"m{j}s{s}")
+                    put(frame, m["cls"], match, fname, m["x"] + dx * step, m["y"] + dy * step, side, f"m{j}s{s}")
             for j, r in enumerate(rejected.get(fname, [])):    # suggestions the labeler dismissed
-                put(crop(frame, r["x"], r["y"], args.size), "neg_hard", match, fname, r["x"], r["y"], f"x{j}")
+                put(frame, "neg_hard", match, fname, r["x"], r["y"], args.size, f"x{j}")
             for j, (x, y) in enumerate(hard_points(frame, marks, args.hard, args.size)):
-                put(crop(frame, x, y, args.size), "neg_hard", match, fname, x, y, f"h{j}")
+                put(frame, "neg_hard", match, fname, x, y, neg_side(), f"h{j}")
             for j, (x, y) in enumerate(random_points(frame, marks, args.neg, args.size, rng)):
-                put(crop(frame, x, y, args.size), "neg", match, fname, x, y, f"r{j}")
+                put(frame, "neg", match, fname, x, y, neg_side(), f"r{j}")
 
     with open(os.path.join(OUT_DIR, "index.csv"), "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
-        w.writerow(["file", "class", "match", "frame", "x", "y"])
+        w.writerow(["file", "class", "match", "frame", "x", "y", "side"])
         w.writerows(rows)
     print(f"{n_frames} reviewed frames -> {len(rows)} crops in {os.path.relpath(OUT_DIR, ROOT)}")
     for cls, n in sorted(counts.items()):

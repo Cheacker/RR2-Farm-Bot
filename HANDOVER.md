@@ -117,10 +117,13 @@ Ana döngü (`RR2Bot.loop`), her turda:
   Example 004 0033.5: the hint lands exactly on a purple treasure at the beam's foot; the second beam's gem was missed.
 - Camera shift between frames could not be measured: phase correlation locks onto the mask edges, and ORB+RANSAC
   finds only 2-7 inliers in most pairs (1.2 s apart, crowded battle). So no cross-frame beam tracking for now.
-- Pipeline: `tools/treasure_label.py` (click to mark items/beam feet per frame, writes `labels.json` next to
-  the frames; every frame stepped past counts as reviewed, empty = negative) -> `tools/treasure_dataset.py`
-  (96 px crops into `dataset/treasure/{treasure,beam,neg,neg_hard}/` + `index.csv`; `neg_hard` = brightest
-  glow spots away from marks). Next: once there are ~100+ marked items, train a small classifier on the crops,
+- Pipeline: `tools/treasure_label.py` (drag a box around an item or click a point, per frame; writes
+  `labels.json` next to the frames: `frames` = marks, `rejected` = dismissed suggestions, `skipped` = frames
+  with a hidden treasure; every frame stepped past counts as reviewed, empty = negative) ->
+  `tools/treasure_dataset.py` (crops scaled to 96 px into `dataset/treasure/{treasure,beam,neg,neg_hard}/`
+  + `index.csv`; boxes cropped 1.3x their longer side, negatives at random scales; `neg_hard` = dismissed
+  suggestions + brightest glow spots away from marks; skipped frames left out). Treasures are often larger
+  than 52 px and sit among units/effects: keep those (real conditions), skip only when unrecognisable. Next: once there are ~100+ marked items, train a small classifier on the crops,
   then a detector (YOLO-nano class) over full frames; then the PathFollower detour.
 
 ## 6. Açık işler
