@@ -27,4 +27,11 @@ uv run python tools/report.py --hours 24                         # maç/saat, in
 uv run python tools/check_regions.py fail_debug <ekran-klasörü>  # şablon bölgeleri oyun güncellemesinden sonra hâlâ doğru mu
 ```
 
+## Hazine verisi (treasure modu kareleri)
+
+```powershell
+uv run python tools/treasure_label.py      # karelerde hazineleri tıklayarak işaretle (tuşlar: dosyanın başında)
+uv run python tools/treasure_dataset.py    # işaretlerden kırpıntı veri seti: dataset/treasure/
+```
+
 Kayıtlar `logs/` altında: `bot_*.log` (konsol), `matches.csv`, `events.csv`, `supervisor.log`, `heartbeat.txt`.

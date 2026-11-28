@@ -101,6 +101,21 @@ Ana döngü (`RR2Bot.loop`), her turda:
 - Known limit (user, 2026-11-26): the king walks along the path **edge**, so treasures dropped in the middle are
   missed (about half).
 
+### Treasure detection (data stage, 2026-11-28)
+
+- Markers: when a building drops a treasure, a light beam comes down from the top of the screen onto the item
+  (purple orb = rune, brown stone, gem...). In the user's 8 sample shots (`dev_tools/treasure/beams_user/`) the
+  beam's warm-light excess (`treasure_vision.glow`) scores ~40-52 against its sides; the background scores 15-35.
+- **A hand-made beam detector does not work on real frames** (`dev_tools/treasure/beam3.py`, `beam4.py`): over
+  181 frames it gave 2-5 false hits per frame (ice crystals, spell explosions, HUD, the victory screen). Even with
+  "must reach the top" + score >= 20, 68 hits, nearly all wrong. Beams are short-lived, sometimes white and
+  slanted, and frames are ~1.2 s apart. So labels come from a human, not from the detector.
+- Pipeline: `tools/treasure_label.py` (click to mark items/beam feet per frame, writes `labels.json` next to
+  the frames; every frame stepped past counts as reviewed, empty = negative) -> `tools/treasure_dataset.py`
+  (96 px crops into `dataset/treasure/{treasure,beam,neg,neg_hard}/` + `index.csv`; `neg_hard` = brightest
+  glow spots away from marks). Next: once there are ~100+ marked items, train a small classifier on the crops,
+  then a detector (YOLO-nano class) over full frames; then the PathFollower detour.
+
 ## 6. Açık işler
 
 - Faz 0 çıktısı: 24 saatlik gözetimli koşu + `tools/report.py` raporu.

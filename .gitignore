@@ -13,3 +13,4 @@ dev_tools/
 logs/
 .venv/
 treasure_bases/
+dataset/

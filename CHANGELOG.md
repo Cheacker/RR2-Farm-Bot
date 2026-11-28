@@ -10,6 +10,9 @@ Uzun, gözetimsiz çalışma için sağlamlık sürümü (Yol Haritası Faz 0).
   Bases where the king died on the path are skipped from then on. Every match's Hidden Treasures are logged to
   `logs/treasures.csv`, and the result screen is saved to `logs/treasure_results/`. Every in-match frame is saved
   to `logs/treasure_frames/` (capped at 8 GB) as training data for treasure detection.
+- **Treasure labeling tools:** `tools/treasure_label.py` lets you click the treasures on those saved frames (with
+  a glow heat map to spot light beams), and `tools/treasure_dataset.py` turns the marks into a crop dataset
+  (`dataset/treasure/`) for training the treasure detector.
 - **No more 5-minute blindness after an emulator restart:** the bot could latch onto LDPlayer's short-lived
   `emulator-5554` entry. It now waits for the real `127.0.0.1:5555` connection, and reconnects at once if the device
   disappears.
