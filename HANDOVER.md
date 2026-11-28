@@ -126,7 +126,12 @@ Ana döngü (`RR2Bot.loop`), her turda:
   than 52 px and sit among units/effects: keep those (real conditions), skip only when unrecognisable.
 - `tools/treasure_review.py` -> `dataset/review_marks.jpg`: numbered tile per mark to catch wrong ones; fix with
   `treasure_label.py --match <m> --frame <f>`. Marks centred under the HUD are left out of the dataset (crop is
-  mostly HUD; the detector ignores the HUD): 10 of 27 on 2026-11-28. Next: once there are ~100+ marked items, train a small classifier on the crops,
+  mostly HUD; the detector ignores the HUD): 10 of 27 on 2026-11-28.
+- State 2026-11-28 23:55: the 4 old matches (181 frames) fully reviewed: 48 marks (17 under the HUD), 14
+  dismissed suggestions -> 95 treasure + 60 beam crops. The user marks most visible treasures with both a box (1)
+  and a beam point (2) at the same spot, so the two classes overlap: merge them for the first model.
+  Beam suggestions found **0 of 18** beam marks (within 80 px): the hand-made finder is no help; the model
+  replaces it. Treasure mode keeps hitting b004 (few active favorites <= 2000): low base variety. Next: once there are ~100+ marked items, train a small classifier on the crops,
   then a detector (YOLO-nano class) over full frames; then the PathFollower detour.
 
 ## 6. Açık işler
