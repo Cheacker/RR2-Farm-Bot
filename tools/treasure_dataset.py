@@ -3,7 +3,8 @@ Build a crop dataset from the treasure labels (tools/treasure_label.py).
 
 For every reviewed frame:
   - each mark -> a crop in dataset/treasure/<class>/ (plus small shifted copies)
-  - hard negatives: the brightest glow spots of the world area that are not near a mark
+  - hard negatives: beam suggestions the labeler dismissed, and the brightest glow spots of the
+    world area that are not near a mark
   - random negatives from the world area, away from every mark
 dataset/treasure/index.csv lists every crop (file, class, match, frame, x, y).
 The folder is rebuilt from scratch on every run.
@@ -93,7 +94,9 @@ def main():
         match_dir = os.path.dirname(lp)
         match = os.path.basename(match_dir)
         with open(lp, encoding="utf-8") as f:
-            frames = json.load(f).get("frames", {})
+            labels = json.load(f)
+        frames = labels.get("frames", {})
+        rejected = labels.get("rejected", {})
         for fname, marks in sorted(frames.items()):
             frame = cv2.imread(os.path.join(match_dir, fname))
             if frame is None:
@@ -103,6 +106,8 @@ def main():
                 for s, (dx, dy) in enumerate(SHIFTS):
                     put(crop(frame, m["x"] + dx, m["y"] + dy, args.size), m["cls"], match, fname,
                         m["x"] + dx, m["y"] + dy, f"m{j}s{s}")
+            for j, r in enumerate(rejected.get(fname, [])):    # suggestions the labeler dismissed
+                put(crop(frame, r["x"], r["y"], args.size), "neg_hard", match, fname, r["x"], r["y"], f"x{j}")
             for j, (x, y) in enumerate(hard_points(frame, marks, args.hard, args.size)):
                 put(crop(frame, x, y, args.size), "neg_hard", match, fname, x, y, f"h{j}")
             for j, (x, y) in enumerate(random_points(frame, marks, args.neg, args.size, rng)):

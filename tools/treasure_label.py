@@ -9,7 +9,8 @@ Usage:
   uv run python tools/treasure_label.py --all           # every match
   uv run python tools/treasure_label.py --match 20261126_010553_b004
 
-Mouse:  left click = mark (current class)   right click = remove the nearest mark
+Mouse:  left click = mark (current class)
+        right click = remove the nearest mark, or dismiss the nearest suggestion (saved as a "not a treasure" example)
 Keys:   d / space = next frame    a = previous frame    n = next match
         1 = class "treasure" (the item on the ground)   2 = class "beam" (foot of a light beam)
         h = glow heat map on/off   c = copy the previous frame's marks   q / Esc = save and quit
@@ -34,6 +35,7 @@ FRAMES_DIR = os.path.join(ROOT, "logs", "treasure_frames")
 CLASSES = {ord("1"): "treasure", ord("2"): "beam"}
 COLORS = {"treasure": (0, 255, 0), "beam": (0, 200, 255)}
 REMOVE_RADIUS = 40
+HINT_RADIUS = 50
 
 
 def frame_files(match_dir):
@@ -64,13 +66,22 @@ def result_text(match_dir):
     return f"{r.get('outcome')}: " + (" | ".join(r.get("hidden_treasures") or []) or "-")
 
 
-def remove_nearest(marks, x, y):
+def remove_nearest(marks, x, y, radius=REMOVE_RADIUS):
+    """Removes and returns the mark nearest to (x, y) within `radius`, else None."""
     if not marks:
-        return
+        return None
     d = [(m["x"] - x) ** 2 + (m["y"] - y) ** 2 for m in marks]
     i = int(np.argmin(d))
-    if d[i] <= REMOVE_RADIUS ** 2:
-        marks.pop(i)
+    if d[i] <= radius ** 2:
+        return marks.pop(i)
+    return None
+
+
+def hint_points(frame, rejected):
+    """Beam suggestions for a frame, minus those already dismissed (right click)."""
+    pts = [{"x": h["foot"][0], "y": h["foot"][1]} for h in beam_candidates(frame)]
+    return [p for p in pts
+            if all((p["x"] - r["x"]) ** 2 + (p["y"] - r["y"]) ** 2 > HINT_RADIUS ** 2 for r in rejected)]
 
 
 def dashed_circle(img, center, r, color):
@@ -81,7 +92,7 @@ def dashed_circle(img, center, r, color):
 def render(frame, marks, cls, heat, header, scale, hints=()):
     img = glow_overlay(frame) if heat else frame.copy()
     for h in hints:
-        dashed_circle(img, h["foot"], 34, (0, 255, 255))
+        dashed_circle(img, (h["x"], h["y"]), 34, (0, 255, 255))
     for m in marks:
         c = COLORS.get(m["cls"], (255, 255, 255))
         cv2.circle(img, (m["x"], m["y"]), 26, c, 3)
@@ -101,31 +112,37 @@ def label_match(match_dir, scale, state):
         return "next"
     labels = load_labels(match_dir)
     frames = labels["frames"]
+    rejected = labels.setdefault("rejected", {})
     name = os.path.basename(match_dir)
     res = result_text(match_dir)
     # start at the first frame not reviewed yet
     i = next((k for k, f in enumerate(files) if f not in frames), 0)
     win = "treasure labels"
     cv2.namedWindow(win, cv2.WINDOW_AUTOSIZE)
-    cur = {"marks": None}
+    cur = {"marks": None, "hints": None, "rejected": None}
 
     def on_mouse(event, x, y, flags, _):
         fx, fy = int(x / scale), int(y / scale)
         if event == cv2.EVENT_LBUTTONDOWN:
             cur["marks"].append({"x": fx, "y": fy, "cls": state["cls"]})
         elif event == cv2.EVENT_RBUTTONDOWN:
-            remove_nearest(cur["marks"], fx, fy)
+            # a mark first; otherwise dismiss a suggestion (kept as a hard negative)
+            if remove_nearest(cur["marks"], fx, fy) is None and state["hints"]:
+                h = remove_nearest(cur["hints"], fx, fy, HINT_RADIUS)
+                if h is not None:
+                    cur["rejected"].append(h)
 
     cv2.setMouseCallback(win, on_mouse)
     while True:
         fname = files[i]
         frame = cv2.imread(os.path.join(match_dir, fname))
         cur["marks"] = [dict(m) for m in frames.get(fname, [])]
-        hints = beam_candidates(frame) if frame is not None else []
+        cur["rejected"] = [dict(r) for r in rejected.get(fname, [])]
+        cur["hints"] = hint_points(frame, cur["rejected"] + cur["marks"]) if frame is not None else []
         while True:
             reviewed = sum(1 for f in files if f in frames)
             header = f"{name}  {i + 1}/{len(files)}  {fname}  reviewed {reviewed}  |  {res}"
-            shown = hints if state["hints"] else ()
+            shown = cur["hints"] if state["hints"] else ()
             cv2.imshow(win, render(frame, cur["marks"], state["cls"], state["heat"], header, scale, shown))
             k = cv2.waitKey(30) & 0xFF
             if k == 255:
@@ -139,12 +156,17 @@ def label_match(match_dir, scale, state):
                 state["heat"] = not state["heat"]
             elif k == ord("s"):
                 state["hints"] = not state["hints"]
-            elif k == ord("g"):
-                cur["marks"] += [{"x": h["foot"][0], "y": h["foot"][1], "cls": "beam"} for h in hints]
+            elif k == ord("g") and state["hints"]:
+                cur["marks"] += [{"x": h["x"], "y": h["y"], "cls": "beam"} for h in cur["hints"]]
+                cur["hints"] = []
             elif k == ord("c") and i > 0:
                 cur["marks"] += [dict(m) for m in frames.get(files[i - 1], [])]
             elif k in (ord("d"), ord(" "), ord("a"), ord("n"), ord("q"), 27):
                 frames[fname] = cur["marks"]
+                if cur["rejected"]:
+                    rejected[fname] = cur["rejected"]
+                else:
+                    rejected.pop(fname, None)
                 labels["done"] = all(f in frames for f in files)
                 save_labels(match_dir, labels)
                 if k in (ord("q"), 27):
